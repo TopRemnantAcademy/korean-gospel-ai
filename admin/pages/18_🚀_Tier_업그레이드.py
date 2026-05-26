@@ -14,8 +14,10 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+import asyncio
+import os
+
 import streamlit as st
-from datetime import datetime
 
 st.set_page_config(
     page_title="Tier 업그레이드 마법사",
@@ -29,19 +31,43 @@ st.markdown(
     "월 $0 에서 시작 → 사용자 수에 따라 자동 단계 업그레이드"
 )
 
-# ===== 모의 데이터 (실제는 DB에서 읽음) =====
-CURRENT_TIER = "tier_0_5"  # 현재 Tier 0.5 (친구 5명 시범)
+# ===== 실측 데이터 로드 =====
+from backend.app.services.tier_monitor import get_monitor, TIER_LIMITS
+
+_monitor = get_monitor()
+
+@st.cache_data(ttl=30)
+def _load_usage():
+    try:
+        usage = asyncio.run(_monitor.measure())
+        return {
+            "subscriber_count": usage.subscriber_count,
+            "active_sessions": usage.active_sessions,
+            "db_size_mb": usage.db_size_mb,
+            "qdrant_index_mb": usage.qdrant_index_mb,
+            "daily_llm_cost": usage.daily_llm_cost_usd,
+        }
+    except Exception:
+        return {
+            "subscriber_count": 0, "active_sessions": 0,
+            "db_size_mb": 0.0, "qdrant_index_mb": 0.0, "daily_llm_cost": 0.0,
+        }
+
+CURRENT_TIER = os.getenv("CURRENT_TIER", "tier_0_5")
+_raw = _load_usage()
+_limits = TIER_LIMITS.get(CURRENT_TIER, {})
+
 CURRENT_METRICS = {
-    "subscriber_count": 5,
-    "max_users": 10,
-    "active_sessions": 2,
-    "max_sessions": 5,
-    "db_size_mb": 45,
-    "max_db_size_mb": 500,
-    "qdrant_index_mb": 150,
-    "max_qdrant_index_mb": 1000,
-    "daily_llm_cost": 0.30,
-    "max_daily_llm_cost": None,  # 무제한
+    "subscriber_count": _raw["subscriber_count"],
+    "max_users": _limits.get("max_users", 10),
+    "active_sessions": _raw["active_sessions"],
+    "max_sessions": _limits.get("max_sessions", 5),
+    "db_size_mb": _raw["db_size_mb"],
+    "max_db_size_mb": _limits.get("max_db_size_mb", 500),
+    "qdrant_index_mb": _raw["qdrant_index_mb"],
+    "max_qdrant_index_mb": _limits.get("max_qdrant_size_mb", 1000),
+    "daily_llm_cost": _raw["daily_llm_cost"],
+    "max_daily_llm_cost": _limits.get("max_daily_llm_cost"),
 }
 
 # Tier 메타데이터

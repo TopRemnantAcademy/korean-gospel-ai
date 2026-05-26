@@ -4,6 +4,36 @@
 
 ---
 
+## [2026-05-26] - Agent: Claude (Cowork) — N 시리즈 버그픽스 + EPIC M 완성
+
+### N 시리즈 — 전체 완료 확인 (코드 검증)
+- N1 fallback.py 첫 chunk probe (stream fallback 실효성 복원)
+- N2 publish_service.py Qdrant upsert를 DB flush 후로 이동 (drift 완화)
+- N3+N17 safety_service 공백·영어·한자·번영신학·율법주의 패턴 확장
+- N4~N9 chat.py signal classify trace + get_or_create 1회 + Interaction 로그 + stream Langfuse + appended_text + cited_versions 공통화
+- N10 subscriber_service update_profile 화이트리스트 (_USER_EDITABLE / _OPERATOR_ONLY)
+- N12 late import 최상단 정리
+- N14 fallback_enabled=False 우회 버그 수정
+- N15 publish_service 옛 published 청크 Qdrant 삭제 (delete_where)
+- N16 body 50자 하드 거부 제거
+
+### EPIC M 업그레이드 스크립트 완성
+- `scripts/upgrade/checks.py` — pre-flight 체크 유틸리티 (command/env/file/network/db)
+- `scripts/upgrade/rollback.py` — DB/.env 스냅샷 생성 + 복원
+- `scripts/upgrade/tier_0_to_0_5.py` — Tier0→0.5, 0.5→1, 1→1.5, 1.5→2 UpgradeRunner 4종 구현
+
+### tier_monitor.py 실측 전환
+- `measure()` 랜덤 데이터 → 실제 DB subscriber count + 파일 크기 + Qdrant 벡터 수 측정
+
+### admin page 18 실데이터 연결
+- 하드코딩 모의 데이터 제거 → `tier_monitor.get_monitor().measure()` 실시간 데이터로 교체
+- `.env` 의 `CURRENT_TIER` 반영
+
+### ORDERS.md 스테일 TODO 정리
+- M2/M3/M4/M5/M6/N18 — ✅ DONE / ✅ RESOLVED 로 업데이트
+
+---
+
 ## [2026-05-26] - Agent: Antigravity — EPIC P: 무료 클라우드 자동 배포 파이프라인 (Hugging Face + Fly.io + Supabase + Qdrant Cloud)
 
 ### 아키텍처: RAM 256MB 제약 해결 & 완전 무료 CI/CD 배포망
