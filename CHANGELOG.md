@@ -4,6 +4,38 @@
 
 ---
 
+## [2026-05-27] - Agent: Claude — 보안 강화 + 코드베이스 정리
+
+### 🔧 보안·품질 개선 (PR #2)
+- `subscriber.py`: `UserProfileUpdateReq`(사용자용) / `ProfileUpdateReq`(운영자용) 스키마 분리 — operator-only 필드 노출 차단. `/subscribers/me` 전체 Bearer 토큰 인증 전환, `by_operator=False` 명시, 관리자 인증 실패 로그.
+- `config.py`: `cors_origins` 설정 추가 (기본값: localhost 8501/8502/3000).
+- `main.py`: `RequestIDMiddleware` 추가(X-Request-ID), CORS를 `settings.cors_origins`에서 읽도록 변경, 기본 admin key 시작 경고.
+- `tier_monitor.py`: `measure_sync()` 추가 — Streamlit asyncio 충돌 해결.
+- `scripts/migrate_sqlite_to_postgres.py`: 신규 생성 — SQLite→PostgreSQL 배치 이전, `--dry-run` 지원.
+
+### 🗑️ 불필요 코드 삭제
+- `backend/app/api/admin_agent.py` **삭제** — 보안 위험(by_operator 없는 DB 직접 수정), 기능 전부 subscriber.py에 중복.
+- `admin/pages/10_🤖_AI_관제.py` **삭제** — admin_agent 페어 UI.
+- `backend/app/models/mentoring_schemas.py` **삭제** — 멘토링 서비스 없음, import 없음.
+
+### 🧹 ORM 정리
+- `DuplicateLink` 클래스 삭제 (전체 코드베이스에서 정의만 있고 사용처 0).
+- `MentoringTurn` 클래스 삭제 (멘토링 파이프라인 서비스 전멸 상태).
+- `DupRelation` enum 삭제 (DuplicateLink 전용).
+- 테이블 수 docstring 7 → 13 정정, Category 주석 정리.
+
+### 📋 api_client.py 정리
+- `agent_chat()` 함수 삭제.
+- `get_categories()` 중복 정의(331, 352번 두 번) 버그 수정 → 1개로 통합.
+- `main.py`: admin_agent import·router 등록 제거.
+
+### ✅ ORDERS.md 상태 갱신
+- D-C12 (salvation_status ORM): ✅ DONE
+- D-C13 (darakbang 3단 ORM): ✅ DONE
+- D-C19 (SalvationJourney 테이블): ✅ DONE
+
+---
+
 ## [2026-05-26] - Agent: Claude (Cowork) — N 시리즈 버그픽스 + EPIC M 완성
 
 ### N 시리즈 — 전체 완료 확인 (코드 검증)

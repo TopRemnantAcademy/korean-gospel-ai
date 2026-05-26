@@ -63,7 +63,7 @@ def create_app() -> FastAPI:
     log.info("[OK] DB initialized")
 
     try:
-        from .api import chat, retrieval, eval as eval_api, admin, documents, memory, prompts, subscriber, admin_agent, invite_codes, auth, glossary, drafts
+        from .api import chat, retrieval, eval as eval_api, admin, documents, memory, prompts, subscriber, invite_codes, auth, glossary, drafts
         app.include_router(chat.router)
         app.include_router(retrieval.router)
         app.include_router(eval_api.router)
@@ -72,12 +72,11 @@ def create_app() -> FastAPI:
         app.include_router(memory.router)
         app.include_router(prompts.router)
         app.include_router(subscriber.router)
-        app.include_router(admin_agent.router)
         app.include_router(invite_codes.router)
         app.include_router(auth.router)
         app.include_router(glossary.router)
         app.include_router(drafts.router)
-        log.info("[OK] routers: chat, retrieval, eval, admin, documents, subscriber, admin_agent, invite_codes, auth, glossary, drafts")
+        log.info("[OK] routers: chat, retrieval, eval, admin, documents, subscriber, invite_codes, auth, glossary, drafts")
     except Exception as e:
         log.exception("[FATAL] router registration failed: %s", e)
         raise

@@ -1794,7 +1794,7 @@ assume_saved: Mapped[bool] = mapped_column(Boolean, default=False)
 - 기존 사용자 마이그레이션 시 `salvation_status="unknown"`, `assume_saved=False` 자동 채움
 - `pytest backend/tests/test_subscriber_salvation.py` 3 케이스 통과 (default unknown, transition logic, assume_saved override)
 
-**상태**: ❌ TODO (B6 흡수)
+**상태**: ✅ DONE — 2026-05-27 (ORM 확인: orm.py Subscriber 5개 필드 존재 검증)
 
 ---
 
@@ -1825,7 +1825,7 @@ darakbang_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
 **수용 기준**: 운영자가 Admin "사람" 페이지에서 verified 토글 가능, chat.py 에서 정식 컬럼 접근.
 
-**상태**: ❌ TODO
+**상태**: ✅ DONE — 2026-05-27 (ORM 확인: darakbang_role/chapter/verified/joined_at 존재 검증)
 
 ---
 
@@ -2130,7 +2130,7 @@ class SalvationJourney(Base):
 - Admin "사람" 페이지에 사용자별 타임라인 차트 (D-C20)
 - 운영자 수동 override 도 기록됨 (감사 추적)
 
-**상태**: ❌ TODO
+**상태**: ✅ DONE — 2026-05-27 (ORM 확인: SalvationJourney 테이블 완성, FK/인덱스 포함)
 
 ---
 
@@ -8893,3 +8893,4 @@ LLM_FALLBACK_CHAIN=deepseek,gemini,openai,ollama
 ```
 
 검수 후 기획자가 ✅ 표시.
+

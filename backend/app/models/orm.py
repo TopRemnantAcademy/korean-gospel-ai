@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM 모델 - 7개 테이블.
+"""SQLAlchemy ORM 모델 — 13개 테이블.
 
 설계는 SETUP 문서 §3 데이터 모델과 1:1 매칭.
 """
@@ -51,14 +51,6 @@ class DocVersionState(str, enum.Enum):
     published = "published"
     superseded = "superseded"
     archived = "archived"
-
-
-class DupRelation(str, enum.Enum):
-    identical = "identical"
-    version = "version"
-    summary_of = "summary_of"
-    series_of = "series_of"
-    unrelated = "unrelated"
 
 
 # ---------------- L1: SourceArtifact (immutable) ----------------
@@ -162,21 +154,6 @@ class IndexSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     version: Mapped[DocumentVersion] = relationship(back_populates="snapshot")
-
-
-# ---------------- DuplicateLink ----------------
-class DuplicateLink(Base):
-    """문서 간 관계 (운영자 결정 결과)."""
-    __tablename__ = "duplicate_link"
-
-    link_id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)
-    doc_id_a: Mapped[str] = mapped_column(ForeignKey("document.doc_id"))
-    doc_id_b: Mapped[str] = mapped_column(ForeignKey("document.doc_id"))
-    similarity_score: Mapped[float] = mapped_column(Float)
-    relation: Mapped[str] = mapped_column(String(30), default=DupRelation.unrelated.value)
-    resolved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
 # ---------------- Subscriber (관제탑 + EPIC D 확장) ----------------
@@ -291,28 +268,6 @@ class AuditLog(Base):
     note: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
 
 
-
-# ---------------- MentoringTurn (관제 파이프라인 로그) ----------------
-class MentoringTurn(Base):
-    __tablename__ = "mentoring_turn"
-
-    turn_id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)
-    session_id: Mapped[str] = mapped_column(String(40), index=True)
-    subscriber_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
-    user_message: Mapped[str] = mapped_column(Text)
-    assistant_message: Mapped[str] = mapped_column(Text)
-    slots_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    crisis_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    eval_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    compressed_context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    llm_engine: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    hijacked: Mapped[bool] = mapped_column(Boolean, default=False)
-    eval_failed: Mapped[bool] = mapped_column(Boolean, default=False)
-    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
-    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
-
-
 # ---------------- PromptTemplate (운영자가 편집 가능) ----------------
 class PromptTemplate(Base):
     """시스템 프롬프트 (active=1 인 행이 현재 사용됨)."""
@@ -329,7 +284,7 @@ class PromptTemplate(Base):
 
 # ---------------- Category (분류 체계) ----------------
 class Category(Base):
-    """신앙 단계, 감정 상태 등의 분류를 유연하게 관리하기 위한 테이블 (Agentic Admin 용)"""
+    """신앙 단계, 감정 상태 등의 분류를 유연하게 관리하기 위한 테이블."""
     __tablename__ = "category"
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)

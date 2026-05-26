@@ -328,35 +328,12 @@ def darakbang_matrix() -> Optional[dict]:
         return None
 
 
-def get_categories(type_: str = None) -> list:
+def get_categories(category_type: str = None) -> list:
     try:
-        params = {"type": type_} if type_ else None
-        with httpx.Client(timeout=10) as c:
+        params = {"type": category_type} if category_type else None
+        with httpx.Client(timeout=30) as c:
             r = c.get(f"{API_BASE}/admin/subscribers/categories", headers=_headers(), params=params)
         data = _handle(r)
         return data.get("categories", []) if data else []
-    except httpx.ConnectError:
-        return []
-
-
-# ===== Agentic Admin =====
-def agent_chat(query: str, history: list) -> Optional[dict]:
-    with httpx.Client(timeout=180) as c:
-        r = c.post(
-            f"{API_BASE}/admin/agent/chat",
-            headers=_headers(),
-            json={"query": query, "history": history}
-        )
-    return _handle(r)
-
-def get_categories(ctype: str = None) -> Optional[list]:
-    # 임시 우회: agent 엔드포인트를 통해 도구를 직접 호출하는 꼼수 혹은 
-    # 별도 라우터 없이 어드민 라우터에 추가된 엔드포인트 가정
-    # 여기서는 /admin/subscribers/categories 로 가정하고 백엔드에 추가
-    try:
-        params = {"type": ctype} if ctype else None
-        with httpx.Client(timeout=30) as c:
-            r = c.get(f"{API_BASE}/admin/subscribers/categories", headers=_headers(), params=params)
-        return _handle(r).get("categories", [])
     except httpx.ConnectError:
         return []
