@@ -45,10 +45,7 @@ def snapshot_env(env_path: str = ".env") -> str:
 
 
 def restore_env(snap_id: str, env_path: str = ".env") -> bool:
-    src = _BACKUP_DIR / f"{snap_id}.env`"
-    if not src.exists():
-        # 언더스코어 없는 버전도 시도
-        src = _BACKUP_DIR / f"{snap_id}.env"
+    src = _BACKUP_DIR / f"{snap_id}.env"
     if not src.exists():
         return False
     shutil.copy2(src, env_path)

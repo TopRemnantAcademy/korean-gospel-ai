@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     admin_api_key: str = "change-me"
     dify_api_key: str = "change-me"
 
+    # ---- CORS ----
+    # 콤마로 구분된 허용 origin 목록. 프로덕션에서는 실제 도메인으로 교체.
+    cors_origins: str = "http://localhost:8501,http://localhost:8502,http://localhost:3000"
+
     # ---- EPIC D Feature Flags (.env 한 줄로 ON/OFF, 재배포 불필요) ----
     salvation_detection_enabled: bool = True    # D-C14: LLM 구원 신호 감지
     salvation_prompt_enabled: bool = True       # D-C18: 구원 상태별 시스템 프롬프트

@@ -14,7 +14,6 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-import asyncio
 import os
 
 import streamlit as st
@@ -39,7 +38,7 @@ _monitor = get_monitor()
 @st.cache_data(ttl=30)
 def _load_usage():
     try:
-        usage = asyncio.run(_monitor.measure())
+        usage = _monitor.measure_sync()
         return {
             "subscriber_count": usage.subscriber_count,
             "active_sessions": usage.active_sessions,

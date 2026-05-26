@@ -1,4 +1,8 @@
-"""멀티 LLM 협업 라우터 (주요 판단/분류 작업)"""
+"""멀티 LLM 협업 라우터 — 사용자 신호 분류, 문서 자동 태깅, 대화 요약, 출력 검증.
+
+chat.py 의 주 대화 흐름에서 호출되는 보조 판단 레이어.
+DeepSeek 우선 + fallback chain 을 통해 JSON 구조 응답을 강제한다.
+"""
 from __future__ import annotations
 import json
 from typing import Dict, Any

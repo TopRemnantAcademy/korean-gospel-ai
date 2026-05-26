@@ -6,8 +6,11 @@ from __future__ import annotations
 import logging
 import sys
 
-from fastapi import FastAPI
+import uuid
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import settings
 from .db import init_db
@@ -20,12 +23,24 @@ logging.basicConfig(
 log = logging.getLogger("gospel-api")
 
 
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """X-Request-ID 헤더 주입 — 없으면 UUID 생성, 있으면 그대로 전달."""
+    async def dispatch(self, request: Request, call_next) -> Response:
+        req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = req_id
+        return response
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Korean Gospel RAG API",
         version="0.3.1",
         description="Lifecycle-aware ingestion + hybrid search + safety policy",
     )
+
+    # Request ID 미들웨어 (가장 바깥에 — 모든 요청에 적용)
+    app.add_middleware(RequestIDMiddleware)
 
     # E-B2: Rate Limit 미들웨어 (CORS 보다 바깥에 등록 → 먼저 실행)
     try:
@@ -35,10 +50,13 @@ def create_app() -> FastAPI:
     except Exception as e:
         log.warning("[WARN] RateLimitMiddleware 등록 실패 (무시): %s", e)
 
+    _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"], allow_credentials=False,
-        allow_methods=["*"], allow_headers=["*"],
+        allow_origins=_cors_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*", "X-Request-ID"],
     )
 
     init_db()
@@ -90,6 +108,11 @@ def create_app() -> FastAPI:
         log.info("  Qdrant    : %s", settings.qdrant_url)
         log.info("  Policy    : %s", "ON" if settings.policy_enabled else "OFF")
         log.info("  Langfuse  : %s", "ON" if settings.langfuse_enabled else "OFF")
+        log.info("  CORS      : %s", settings.cors_origins)
+        if settings.admin_api_key == "change-me":
+            log.warning("⚠️  SECURITY: admin_api_key 가 기본값입니다. .env 에서 반드시 변경하세요!")
+        if settings.dify_api_key == "change-me":
+            log.warning("⚠️  SECURITY: dify_api_key 가 기본값입니다.")
         log.info("=" * 60)
 
     return app

@@ -1,11 +1,15 @@
 """사용자 관리 및 관제탑 API"""
 from __future__ import annotations
+import logging
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 
 from ..services.subscriber_service import get_or_create, update_profile, get_all_subscribers
 from ..config import settings
+from .auth import get_current_user
+
+log = logging.getLogger("gospel-api.subscriber")
 
 # =============================================================================
 # 🔧 AI-AGENT-WORK
@@ -19,7 +23,11 @@ from ..config import settings
 
 router = APIRouter(prefix="", tags=["subscriber"])
 
-class ProfileUpdateReq(BaseModel):
+
+class UserProfileUpdateReq(BaseModel):
+    """일반 사용자가 직접 수정할 수 있는 필드만 포함.
+    운영자 전용 필드(salvation_status, assume_saved, darakbang_role, darakbang_verified)는 제외.
+    """
     display_name: Optional[str] = None
     journey_stage: Optional[str] = None
     faith_stage: Optional[str] = None
@@ -29,37 +37,51 @@ class ProfileUpdateReq(BaseModel):
     current_struggle: Optional[str] = None
     preferred_tone: Optional[str] = None
     is_darakbang_member: Optional[bool] = None
-    # ❌ AI-REMOVE 2026-05-20 [Cascade]: is_believer 제거 (ORDERS B6 - salvation_status로 대체됨)
+    darakbang_chapter: Optional[str] = None   # 사용자 자기신고 허용
     consent_data: Optional[bool] = None
     consent_kakao: Optional[bool] = None
-    # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: D-C12 구원 상태 필드 추가
+
+
+class ProfileUpdateReq(BaseModel):
+    """운영자용 전체 프로필 수정 (운영자 전용 필드 포함)."""
+    display_name: Optional[str] = None
+    journey_stage: Optional[str] = None
+    faith_stage: Optional[str] = None
+    emotional_state: Optional[str] = None
+    age_group: Optional[str] = None
+    gender: Optional[str] = None
+    current_struggle: Optional[str] = None
+    preferred_tone: Optional[str] = None
+    is_darakbang_member: Optional[bool] = None
+    consent_data: Optional[bool] = None
+    consent_kakao: Optional[bool] = None
+    # 운영자 전용 필드
     salvation_status: Optional[str] = None
     assume_saved: Optional[bool] = None
-    # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: D-C13 다락방 3단 필드 추가
     darakbang_role: Optional[str] = None
     darakbang_chapter: Optional[str] = None
     darakbang_verified: Optional[bool] = None
 
+
 def _check_admin(authorization: str | None):
     if not authorization or not authorization.lower().startswith("bearer "):
+        log.warning("Admin auth failed: missing or malformed Authorization header")
         raise HTTPException(status_code=403, detail="missing admin token")
     token = authorization.split(" ", 1)[1].strip()
     if token != settings.admin_api_key:
+        log.warning("Admin auth failed: invalid token presented")
         raise HTTPException(status_code=403, detail="invalid admin token")
 
 @router.get("/subscribers/me")
-def get_my_profile(user_id: str):
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id required")
-    sub = get_or_create(user_id)
+def get_my_profile(current_user: str = Depends(get_current_user)):
+    sub = get_or_create(current_user)
     return sub
 
+
 @router.patch("/subscribers/me")
-def update_my_profile(user_id: str, req: ProfileUpdateReq):
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id required")
+def update_my_profile(req: UserProfileUpdateReq, current_user: str = Depends(get_current_user)):
     fields = {k: v for k, v in req.model_dump().items() if v is not None}
-    sub = update_profile(user_id, fields)
+    sub = update_profile(current_user, fields, by_operator=False)
     return sub
 
 @router.get("/admin/subscribers/list")
@@ -297,10 +319,10 @@ def darakbang_matrix(authorization: Optional[str] = Header(default=None)):
 # ─────────────────────────────────────────
 
 @router.get("/subscribers/me/quota")
-def get_my_quota(user_id: str):
+def get_my_quota(current_user: str = Depends(get_current_user)):
     """현재 사용자 토큰 잔량 조회 (User UI 표시용)."""
     from ..services.token_service import get_quota_status
-    return get_quota_status(user_id)
+    return get_quota_status(current_user)
 
 
 class GrantTokensReq(BaseModel):
