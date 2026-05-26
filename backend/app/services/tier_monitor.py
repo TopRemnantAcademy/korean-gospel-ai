@@ -86,34 +86,68 @@ class TierMonitor:
         self.alert_history = []  # 최근 50개 알림
     
     async def measure(self) -> TierUsage:
-        """현재 리소스 사용량 측정 (모의 데이터)"""
-        # 실제 구현에서는 DB/Qdrant/API 에서 실시간 측정
-        import random
-        
-        subscriber_count = random.randint(1, 100)
-        active_sessions = random.randint(0, 50)
-        db_size_mb = random.uniform(10, 1000)
-        qdrant_index_mb = random.uniform(100, 5000)
-        daily_llm_cost = random.uniform(0.1, 10)
-        response_time_ms = random.uniform(100, 2000)
-        
+        """현재 리소스 사용량 실측."""
+        subscriber_count = self._count_subscribers()
+        db_size_mb = self._db_size_mb()
+        qdrant_index_mb = self._qdrant_size_mb()
+
         usage = TierUsage(
             timestamp=datetime.now().isoformat(),
             subscriber_count=subscriber_count,
-            active_sessions=active_sessions,
+            active_sessions=0,  # 세션 추적 미구현 — 향후 Redis 기반으로 대체
             db_size_mb=db_size_mb,
             qdrant_index_mb=qdrant_index_mb,
-            daily_llm_cost_usd=daily_llm_cost,
-            streamlit_response_time_ms=response_time_ms,
+            daily_llm_cost_usd=0.0,  # 토큰 사용량 집계 미구현 — E-A tokens_lifetime_used 활용 예정
+            streamlit_response_time_ms=0.0,
             warnings=[],
         )
-        
-        # 사용 기록 저장
+
         self.usage_history.append(usage)
         if len(self.usage_history) > 100:
             self.usage_history = self.usage_history[-100:]
-        
+
         return usage
+
+    def _count_subscribers(self) -> int:
+        try:
+            import sys
+            from pathlib import Path
+            _root = Path(__file__).resolve().parent.parent.parent.parent
+            if str(_root) not in sys.path:
+                sys.path.insert(0, str(_root))
+            from backend.app.db import get_session
+            from backend.app.models.orm import Subscriber
+            with get_session() as s:
+                return s.query(Subscriber).count()
+        except Exception:
+            return 0
+
+    def _db_size_mb(self) -> float:
+        import os
+        from pathlib import Path
+        candidates = [".gospel.db", "gospel.db", "data/gospel.db"]
+        for c in candidates:
+            p = Path(c)
+            if p.exists():
+                return round(p.stat().st_size / (1024 * 1024), 2)
+        return 0.0
+
+    def _qdrant_size_mb(self) -> float:
+        """Qdrant 컬렉션 크기 조회. 실패 시 0 반환."""
+        try:
+            from qdrant_client import QdrantClient
+            import os
+            url = os.getenv("QDRANT_URL", "http://localhost:6333")
+            key = os.getenv("QDRANT_API_KEY") or None
+            client = QdrantClient(url=url, api_key=key, timeout=3)
+            total = 0
+            for col in client.get_collections().collections:
+                info = client.get_collection(col.name)
+                total += getattr(info, "vectors_count", 0) or 0
+            # 벡터 수 × 평균 벡터 크기(768dim float32 ≈ 3KB) 로 MB 추정
+            return round(total * 3 / 1024, 1)
+        except Exception:
+            return 0.0
     
     async def check_thresholds(self, usage: TierUsage) -> list:
         """한계치 초과 확인"""

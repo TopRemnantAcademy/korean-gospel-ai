@@ -278,7 +278,10 @@ class TierUpgrade(UpgradeRunner):
 
 **Idempotency**: 같은 스크립트 두 번 실행해도 *문제 없음* (이미 적용 시 skip).
 
-**상태**: ❌ TODO
+**상태**: ✅ DONE — 2026-05-26
+- `scripts/upgrade/checks.py` — pre-flight 체크 유틸리티
+- `scripts/upgrade/rollback.py` — DB/.env 스냅샷 + 복원
+- `scripts/upgrade/tier_0_to_0_5.py` — Tier0→0.5, 0.5→1, 1→1.5, 1.5→2 UpgradeRunner 구현
 
 ---
 
@@ -346,7 +349,7 @@ async def subscribe(...):
 
 **Admin UI**: Tier 별 활성 기능 매트릭스 표시. 어느 기능이 어느 Tier 에 켜지는지 한눈에.
 
-**상태**: ❌ TODO
+**상태**: ✅ DONE — 2026-05-26 (`backend/app/services/feature_flags.py` 완성, admin page 18 비교 탭에 매트릭스 포함)
 
 ---
 
@@ -386,7 +389,7 @@ class TierMonitor:
 - Tier 1+: 운영자 이메일 + SMS
 - Tier 2+: 카카오 알림톡
 
-**상태**: ❌ TODO
+**상태**: ✅ DONE — 2026-05-26 (`backend/app/services/tier_monitor.py` 완성, measure()가 실제 DB/Qdrant 측정으로 교체, admin page 18에서 실시간 사용률 표시)
 
 ---
 
@@ -468,7 +471,7 @@ class TierMonitor:
 
 **총합**: Tier 1.5 (200명) 까지 *도메인 $10/년 외 진짜 $0*.
 
-**상태**: ❌ TODO
+**상태**: ✅ DONE — 2026-05-26 (`docs/FREE_TIER_GUIDE.md` 이미 완성)
 
 ---
 
@@ -564,7 +567,7 @@ class InviteCode(Base):
 - 다락방 시범용: `DARAK001~DARAK099`
 - 사역자용: `PASTOR01~PASTOR10` (더 많은 토큰)
 
-**상태**: ❌ TODO
+**상태**: ✅ DONE — 2026-05-21 (초대 코드 시스템 완성, 시드 발급은 Admin UI에서 수동 생성)
 
 ---
 
@@ -1128,7 +1131,7 @@ Category 테이블 — Antigravity Agent 가 추가, ORDERS SUPERSEDED 에서 *�
 - 사용 0건이면 → ORDERS SUPERSEDED 의 *삭제 작업* 즉시 진행
 - 사용 있으면 → 정식 ORM 으로 인정 + 시드 유지
 
-**상태**: ❌ TODO 🟡
+**상태**: ✅ RESOLVED — 2026-05-26 Category 는 `admin_agent.py`, `subscriber.py`, `db.py` 에서 실제 사용 중. 정식 ORM 으로 인정, 시드 유지.
 
 ---
 
