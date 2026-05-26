@@ -1,0 +1,93 @@
+name: Deploy to Cloud (Fly.io + HF Spaces)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run Tests & Schema Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest # pytest가 requirements.txt에 없으므로 수동 설치
+
+      - name: Run Pytest
+        run: pytest backend/tests/ -v
+        env:
+          EMBEDDER: hf_inference # 로컬에 1.3GB KURE 모델을 로딩해 뻗는 것을 방지
+          HF_TOKEN: "dummy_token"
+          QDRANT_SPARSE_ENABLED: "false"
+
+      - name: Alembic Migration Dry-run
+        run: alembic upgrade head --sql > migration_dryrun.sql
+
+  deploy-backend:
+    name: Deploy API to Fly.io
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-streamlit:
+    name: Deploy Streamlit User UI to HF Spaces
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 전체 커밋 로그 받아오기 필수 (HF push용)
+
+      - name: Push to HF Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        run: |
+          # Hugging Face 원격지 추가 및 강제 푸시
+          git remote add hf https://oauth:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/gospel-ai
+          git push hf main --force
+
+  migrate:
+    name: Run Database Migrations on Supabase
+    needs: deploy-backend
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install DB Drivers & Alembic
+        run: |
+          pip install alembic psycopg2-binary python-dotenv pydantic pydantic-settings
+
+      - name: Run Alembic Upgrade
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}

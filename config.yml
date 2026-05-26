@@ -1,0 +1,32 @@
+tunnel: gospel-ai
+credentials-file: ~/.cloudflared/{TUNNEL_ID}.json
+
+# 운영자 입력 필요: credentials-file 경로를 실제 UUID 로 변경하세요
+# 예: credentials-file: C:\Users\YourUsername\.cloudflared\12345678-1234-1234-1234-123456789012.json
+# 
+# UUID 찾기:
+#   dir %USERPROFILE%\.cloudflared\*.json
+#   파일명이 UUID 입니다.
+
+ingress:
+  # 사용자 UI (User)
+  - hostname: gospel-ai.trycloudflare.com
+    service: http://localhost:8502
+    # 공개 접근, 하지만 user/app.py 에서 베타 초대 코드 검증
+
+  # 관리자 UI (Admin)
+  - hostname: admin-gospel-ai.trycloudflare.com
+    service: http://localhost:8501
+    # Cloudflare Access 로 보호해야 함 (Email OTP 또는 Google OAuth)
+    # 설정: https://dash.cloudflare.com/ → Tunnel → gospel-ai
+    #      → Configure → Public Hostnames
+    #      → admin-gospel-ai.trycloudflare.com
+    #      → Application Settings → Access (Authentication Required)
+
+  # 나머지 모든 호스트는 404
+  - service: http_status:404
+
+# 고급 설정 (선택)
+# loglevel: debug                    # 디버그 로그 활성화
+# logfile: TUNNEL_LOGS.txt           # 로그 파일
+# metrics: localhost:8888            # Prometheus 메트릭

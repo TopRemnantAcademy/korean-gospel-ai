@@ -1,0 +1,44 @@
+name: Manual Rollback to Specific Commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: '돌아갈 대상 Commit SHA (예: a1b2c3d)'
+        required: true
+        type: string
+
+jobs:
+  rollback-backend:
+    name: Rollback Fly.io API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.commit_sha }}
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy Selected Commit to Fly.io
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  rollback-streamlit:
+    name: Rollback HF Spaces User UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: Push to HF Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        run: |
+          git remote add hf https://oauth:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/gospel-ai
+          # 해당 특정 커밋을 HF Spaces의 main 브랜치로 강제 배포
+          git push hf HEAD:refs/heads/main --force

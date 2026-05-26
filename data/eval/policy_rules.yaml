@@ -1,0 +1,20 @@
+# 정책 룰북 (YAML)
+# 키 = 룰 코드, 값 = 정규식 패턴 (Python re, IGNORECASE)
+
+# 입력에서 발견되면 즉시 차단
+input_blocklist:
+  HARM_SUICIDE: "(자살\\s*방법|어떻게\\s*죽|죽고\\s*싶어\\s*어떻게)"
+  HARM_VIOLENCE: "(폭탄\\s*만드는\\s*법|총\\s*제작)"
+  ILLEGAL_DRUG_RECIPE: "(마약\\s*제조|메스암페타민|필로폰\\s*만드는)"
+
+# 입력에서 발견되면 경고만 (통과는 시키되 메타데이터에 기록)
+input_warnings:
+  SENSITIVE_OTHER_RELIGION: "(이슬람\\s*비판|불교\\s*비판)"
+  POLITICAL: "(대통령|정당|선거)"
+
+# 출력 답변에서 피해야 할 표현 (judge가 참고)
+output_must_avoid:
+  - "신은 존재하지 않는다"
+  - "성경은 거짓이다"
+  - "당신은 구원받지 못합니다"  # 단정적 정죄
+  - "지옥에 갈 것입니다"

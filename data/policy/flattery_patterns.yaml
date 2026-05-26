@@ -1,0 +1,95 @@
+# 아첨금지 Layer A — 정규식·키워드 사전 필터
+# 운영자가 코드 수정 없이 이 파일만 편집하여 패턴 추가 가능.
+# 모든 패턴은 정적 ReDoS 검토 후 등록 (catastrophic backtracking 금지).
+# 값은 Python re 문법의 정규식 문자열 (flags=IGNORECASE|DOTALL 자동 적용).
+
+ko:
+  flattery:
+    - "와[아]?[!~]+"          # 와!, 와~, 와아! (conjunction "와 " 오탐 방지: !~ 필수)
+    - "정말\\s*멋진"
+    - "너무\\s*멋져요"
+    - "정말\\s*훌륭하"
+    - "너무\\s*훌륭"           # 너무 훌륭하고 멋있어요 등
+    - "정말\\s*좋으신"
+    - "대단하세요"
+    - "정말\\s*잘하셨어요"
+    - "너무\\s*대단해요"
+    - "완전\\s*멋있"
+    - "정말\\s*대단하고"
+  excessive_praise:
+    - "정말\\s*좋은\\s*질문"
+    - "훌륭한\\s*질문"
+    - "좋은\\s*질문이"           # "좋은 질문이세요" 등
+    - "정말\\s*멋진\\s*생각"
+    - "최고의\\s*통찰"
+    - "감동적이네요"
+    - "감동적이에요"             # 감동적이에요 변형
+    - "탁월한\\s*질문"
+    - "놀라운\\s*통찰"
+    - "훌륭한\\s*통찰"
+    - "정말\\s*잘\\s*파악하셨"
+    - "좋은\\s*신앙심"           # 정말 좋은 신앙심이에요
+  childish_friendliness:
+    - "걱정\\s*마요[!~]?"
+    - "괜찮아요[!~]?"
+    - "ㅋ{2,}"                   # ㅋㅋ 이상
+    - "ㅎ{2,}"                   # ㅎㅎ 이상
+    - "[~!]{2,}"                 # !! ~~ 중복 감탄 (단독 ! 제외)
+    - "[😀-🙏✨🎉💕❤️🥰😍🙌👏]"   # 이모지 (답변에서)
+  emotional_pandering:
+    - "정말\\s*이해해요"          # "그 마음 정말 이해해요"
+    - "완전\\s*공감"              # "완전 공감해요"
+    - "맞아요\\s*맞아요"         # "맞아요 맞아요!"
+    - "정말\\s*(그렇죠|맞죠)"
+    - "당신\\s*말이.{0,10}맞"    # "당신 말이 완전 맞는 것 같아요"
+    - "맞아요[,!]?\\s*당연히"    # "맞아요, 당연히 힘들죠"
+  unbiblical_agreement:
+    - "사단이.{0,8}잘못"         # "사단이 다 잘못한 거"
+    - "당신\\s*잘못이\\s*아니"   # "당신 잘못이 아니에요"
+    - "부적.{0,15}효과가\\s*있"  # "부적도 어느 정도는 효과가 있"
+    - "하나님의\\s*방법일"        # "그것도 하나님의 방법일 수 있죠"
+    - "귀신.{0,10}쫓아내면"      # "귀신을 쫓아내면"
+    - "사단\\s*때문이에요"        # "다 사단 때문이에요"
+
+en:
+  flattery:
+    - "(?i)what\\s+a\\s+great"
+    - "(?i)amazing\\s+question"
+    - "(?i)amazing\\s+insight"
+    - "(?i)you('re| are)\\s+doing\\s+(great|wonderful|amazing)"
+    - "(?i)you('re| are)\\s+amazing"
+    - "(?i)i\\s+love\\s+(that|how)"
+    - "(?i)how\\s+wonderful"
+    - "(?i)how\\s+amazing"
+    - "(?i)you\\s+are\\s+so\\s+(wise|insightful|brilliant)"
+  excessive_praise:
+    - "(?i)excellent\\s+question"
+    - "(?i)brilliant\\s+insight"
+    - "(?i)great\\s+question"
+    - "(?i)fantastic\\s+question"
+    - "(?i)wonderful\\s+question"
+    - "(?i)such\\s+a\\s+(good|great|wonderful|insightful)\\s+question"
+  childish_friendliness:
+    - "(?i)don't\\s+worry[!]{1,}"
+    - "(?i)you've\\s+got\\s+this[!]"
+    - "[!]{2,}"                  # !! 이상 연속 감탄부호
+
+zh:
+  flattery:
+    - "好问题"
+    - "太棒了"
+    - "厉害"
+    - "了不起"
+    - "真厉害"
+    - "太好了"
+    - "真棒"
+    - "很了不起"
+    - "你真的很"
+    - "你太聪明"
+  excessive_praise:
+    - "精彩的见解"
+    - "非常好的问题"
+    - "很棒的问题"
+    - "出色的问题"
+    - "很有见地"
+    - "非常深刻"

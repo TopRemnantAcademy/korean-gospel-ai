@@ -1,0 +1,46 @@
+# 환경변수
+.env
+gospel.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Vector DB / 캐시
+chroma_db/
+.docker/
+.cache/
+~/.cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 모델 다운로드
+.huggingface/
+
+# 데이터베이스
+*.db
+*.sqlite
+*.sqlite3
+
+# SSH 키
+*.pem
+*.key
+
+# 업로드 파일 (용량 큰 바이너리)
+data/uploads/
+data/raw/
+
+# 백업 스크립트 생성 로그
+*.log
+
+# 레거시 (아카이브)
+_legacy*/
