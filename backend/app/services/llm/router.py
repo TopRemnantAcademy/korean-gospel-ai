@@ -1,15 +1,16 @@
-"""멀티 LLM 협업 라우터 — 사용자 신호 분류, 문서 자동 태깅, 대화 요약, 출력 검증.
+"""사용자 신호 분류 라우터 — classify_user_signal 단일 책임.
 
-chat.py 의 주 대화 흐름에서 호출되는 보조 판단 레이어.
-DeepSeek 우선 + fallback chain 을 통해 JSON 구조 응답을 강제한다.
+chat.py 의 주 대화 흐름에서 호출.
+DeepSeek 우선 + fallback chain 으로 JSON 응답을 강제한다.
+
+미사용 함수(auto_tag_document, summarize_history, judge_output_strict)는
+ORDERS.md C4 결정에 따라 삭제됨 — 필요 시 각 서비스(cleanup, memory, safety)에 재구현.
 """
 from __future__ import annotations
 import json
-from typing import Dict, Any
 
 from .fallback import chat_with_fallback
 from .base import Message
-from ...config import settings
 
 # =============================================================================
 # 🔧 AI-AGENT-WORK
@@ -63,42 +64,3 @@ async def classify_user_signal(text: str) -> dict:
 JSON으로만 응답하세요."""
     return await _call_llm_json(sys_prompt, text)
 
-async def auto_tag_document(text: str, doc_type: str) -> dict:
-    """DeepSeek로 자료 자동 메타 제안.
-    Returns {target_audience[], target_stage[], emotion_tone, difficulty, suggested_tags[], suggested_refs[]}.
-    """
-    sys_prompt = f"""당신은 {doc_type} 문서를 분석하여 대상과 태그를 추출하는 기독교 문서 분류가입니다.
-추출할 필드:
-- target_audience: ["seeker", "new_believer", "growing", "leader", "darakbang"] 중 해당되는 것 배열
-- target_stage: ["exploring", "hurting", "healing", "growing", "mentoring"] 중 배열
-- emotion_tone: comforting, challenging, teaching, worship, prophetic 중 하나
-- difficulty: 1~5 (초신자용 1, 신학적/심화 5)
-- suggested_tags: 자유로운 태그 배열
-- suggested_refs: 성경 구절 참조 배열 (예: ["John 3:16"])
-
-JSON으로만 응답하세요."""
-    return await _call_llm_json(sys_prompt, text[:3000]) # 앞부분만으로 판단
-
-async def summarize_history(messages: list) -> str:
-    """장기 대화 메모리 압축 (DeepSeek)."""
-    text_msgs = []
-    for m in messages:
-        text_msgs.append(f"{m.get('role', 'user')}: {m.get('content', '')}")
-    history_text = "\n".join(text_msgs)
-    
-    sys_prompt = "다음 대화 내용을 핵심 주제와 사용자의 상태 변화 중심으로 3문장 이내로 요약하세요."
-    messages_llm = [Message(role="user", content=history_text)]
-    resp, _, _ = await chat_with_fallback(
-        messages_llm,
-        primary_provider="deepseek",
-        system=sys_prompt,
-        temperature=0.3,
-        max_tokens=500
-    )
-    return resp.text
-
-async def judge_output_strict(question: str, answer: str, profile: dict = None) -> dict:
-    """DeepSeek-judge — Gemini judge 보완 또는 대체."""
-    sys_prompt = "당신은 기독교 AI의 답변을 평가하는 엄격한 평가자입니다. 답변이 이단적이거나, 공격적이거나, 성경과 어긋나면 pass: false를 반환하세요."
-    user_prompt = f"질문: {question}\n\n답변: {answer}\n\n결과를 JSON으로 반환하세요. {{'pass': boolean, 'score': 1~10, 'notes': '이유'}}"
-    return await _call_llm_json(sys_prompt, user_prompt)
