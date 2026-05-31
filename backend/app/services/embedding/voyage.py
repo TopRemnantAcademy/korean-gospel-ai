@@ -22,7 +22,11 @@ class VoyageEmbedder(BaseEmbedder):
     def __init__(self, model_id: str | None = None):
         self._model_id = model_id or self.model_id
         self._api_key = settings.voyage_api_key
-        self._api_url = "https://api.voyageai.com/v1/embeddings"
+        # connections.py 레지스트리에서 Voyage 설정 가져옴
+        from ...connections import connections
+        _cfg = connections.voyage()
+        self._api_url = _cfg["url"] if _cfg else "https://api.voyageai.com/v1/embeddings"
+        self._headers = _cfg["headers"] if _cfg else {"Authorization": f"Bearer {self._api_key}"}
         self._dim = 512  # voyage-3-lite 고정 차원
 
     @property
@@ -35,7 +39,7 @@ class VoyageEmbedder(BaseEmbedder):
                 "Voyage AI API Key is missing. Please set VOYAGE_API_KEY in your environment/secrets."
             )
 
-        headers = {"Authorization": f"Bearer {self._api_key}"}
+        headers = self._headers
         payload = {
             "input": texts,
             "model": self._model_id,

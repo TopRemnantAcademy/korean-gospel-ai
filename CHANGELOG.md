@@ -4,6 +4,36 @@
 
 ---
 
+## [2026-05-27] - Agent: Claude — 성능 최적화 + 재방문 영적 메시지 시스템
+
+### ⚡ 성능 최적화
+- `subscriber_service.py`: `_row_to_dict()` 공통 헬퍼 추출 — ORM→dict 변환 단일화.
+  `prepare_profile()` 신규 — `increment_question` + `merge_auto_signal` + `get_or_create` 3회 세션 → 1회 통합.
+  `increment_question()` 원자적 UPDATE + `last_active_at` 명시 갱신 (벌크 UPDATE는 `onupdate` 훅 미작동).
+- `retriever.py`: `_retriever_cache` + `get_retriever()` 추가 — 동일 embedder 이름이면 캐시 반환.
+  HybridRetriever(embedder 로드 + QdrantStore + reranker 초기화) 매 요청 재생성 제거.
+- `prompt_service.py`: `current_text()` 60초 TTL 인메모리 캐시 — 매 요청 DB 조회 제거.
+  `save()` / `reset_to_default()` 호출 시 캐시 즉시 무효화.
+- `chat.py`: `prepare_profile` 사용으로 subscriber 구간 DB 세션 3→1 축소.
+  `HybridRetriever()` 직접 생성 → `get_retriever()` 캐시 조회로 교체 (chat + stream 양쪽).
+
+### 🙏 재방문 영적 메시지 시스템
+- `greeting_service.py` **신규** — 감정 위로 완전 배제, 영적 재해석 질문 방향으로 전환.
+  `rule_based_greeting()`: 감정/여정/구원 상태 기반 영적 재해석 메시지 (LLM 없음, 즉시).
+  `llm_greeting()`: DeepSeek 기반 개인화, 금지 표현 6개 시스템 프롬프트에 명시.
+  `generate_greeting()`: auto/rule/llm 모드 통합 진입점.
+- `chat.py` 엔드포인트 3개 추가:
+  - `GET /chat/ping` — Subscriber 3컬럼만 조회, Interaction 쿼리 없음 (~20ms), `is_returning` + `days_away` + `hint` 반환.
+  - `GET /chat/greeting/simulate` — 관리자용 조건 입력 → 규칙 기반 메시지 즉시 미리보기.
+  - `GET /chat/greeting` — 재방문 영적 재해석 메시지 (rule ~50ms / llm ~1s).
+- `admin/lib/api_client.py`: `chat_ping()`, `simulate_greeting()`, `get_greeting()` 추가.
+- `admin/pages/19_🙏_재방문_관리.py` **신규** — 3탭 어드민 페이지:
+  탭1 사용자 테스트(Ping + 메시지 생성 + Rule vs LLM 비교),
+  탭2 메시지 시뮬레이터(전체 감정×여정 조합 표),
+  탭3 재방문 현황(5개 지표 카드 + 감정분포 + 경과일분포 + 개별 테스트).
+
+---
+
 ## [2026-05-27] - Agent: Claude — 보안 강화 + 코드베이스 정리
 
 ### 🔧 보안·품질 개선 (PR #2)

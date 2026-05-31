@@ -20,8 +20,11 @@ from dotenv import load_dotenv
 
 load_dotenv(_ROOT / ".env")
 
+from admin.lib.auth import gate
+gate(os.getenv("APP_PASSWORD", ""))
+
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
-ADMIN_TOKEN = os.getenv("ADMIN_API_KEY", "")
+ADMIN_TOKEN = os.getenv("ADMIN_API_KEY", "local-admin-key")
 HEADERS = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 st.set_page_config(page_title="용어집", page_icon="📚", layout="wide")

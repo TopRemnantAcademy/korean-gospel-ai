@@ -18,11 +18,14 @@ from dotenv import load_dotenv
 
 load_dotenv(_ROOT / ".env")
 
+from admin.lib.auth import gate
+gate(os.getenv("APP_PASSWORD", ""))
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from lib.ui_components import stepper, empty_state, draft_status_badge
 
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
-ADMIN_TOKEN = os.getenv("ADMIN_API_KEY", "")
+ADMIN_TOKEN = os.getenv("ADMIN_API_KEY", "local-admin-key")
 HEADERS = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 st.set_page_config(page_title="자료 흐름", page_icon="📥", layout="wide")

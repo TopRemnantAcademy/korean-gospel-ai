@@ -1,0 +1,45 @@
+# ─── Korean Gospel RAG — 클라우드 배포 전용 requirements ─────────────────────
+# 로컬 ML 모델(sentence-transformers, fastembed 등) 제거 → 메모리 ~200MB
+# 임베딩: HF Inference API (HF_TOKEN 필요)
+# Reranker: none 또는 Cohere API (COHERE_API_KEY 선택)
+# Qdrant: 서버 모드 (QDRANT_URL=https://xxx.qdrant.tech)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ----- Web -----
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+pydantic==2.10.4
+pydantic-settings==2.7.0
+httpx==0.28.1
+
+# ----- LLM -----
+google-genai==0.3.0
+openai==1.59.6
+
+# ----- Vector DB (서버 모드 — embedded 드라이버 불필요) -----
+qdrant-client==1.12.2
+
+# ----- Database -----
+sqlalchemy==2.0.36
+alembic==1.14.0
+
+# ----- Korean text -----
+kss==6.0.5
+
+# ----- Tracing -----
+langfuse==2.57.0
+
+# ----- Document loaders -----
+pypdf==5.1.0
+python-docx==1.1.2
+pymupdf==1.25.1
+Pillow==10.4.0
+
+# ----- Utils -----
+python-dotenv==1.0.1
+PyYAML==6.0.2
+numpy==2.0.2
+
+# ----- 선택: Cohere Reranker (API 기반, 메모리 절약) -----
+# cohere==5.13.5

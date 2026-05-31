@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     llm_provider: Literal["gemini", "openai", "claude", "ollama", "deepseek"] = "gemini"
     llm_fallback_enabled: bool = True
     llm_fallback_chain: str = ""  # 비우면 primary + API 키 있는 provider 순
+    llm_provider_timeout_sec: int = 20  # 1개 provider 최대 대기 시간 (초). 초과 시 다음 provider로 즉시 전환
     google_api_key: Optional[str] = None
     gemini_model: str = "gemini-2.5-flash"
     openai_api_key: Optional[str] = None
@@ -80,6 +81,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:8501,http://localhost:8502,http://localhost:3000"
 
     # ---- EPIC D Feature Flags (.env 한 줄로 ON/OFF, 재배포 불필요) ----
+    classify_input_enabled: bool = True          # G-1: LLM 입력 분류 (false = 기본값 사용, Gemini API 쿼터 절약)
     salvation_detection_enabled: bool = True    # D-C14: LLM 구원 신호 감지
     salvation_prompt_enabled: bool = True       # D-C18: 구원 상태별 시스템 프롬프트
     retriever_boost_enabled: bool = True        # D-C16: 구원·다락방 boost matrix
@@ -95,6 +97,17 @@ class Settings(BaseSettings):
     tokens_monthly_darakbang: int = 200_000     # 다락방 멤버 월간 풀
     tokens_bonus_on_signup: int = 20_000        # 가입 보너스 (1회)
     token_estimate_per_request: int = 2000      # 요청 사전 차감 견적
+
+    # ---- INGEST 파이프라인 (문서 재편집 + 청킹) ----
+    # 각 단계 .env 한 줄로 ON/OFF. LLM 단계는 DeepSeek 등 chat_with_fallback 경유.
+    ingest_normalize_enabled: bool = True        # Stage 1: 구어체 정리 (규칙, 빠름)
+    ingest_restructure_enabled: bool = False     # Stage 2: 섹션헤딩+문어체 (LLM, 느림·비용)
+    ingest_contextual_enabled: bool = False      # Stage 4: 청크 맥락 강화 (LLM, 검색정확도↑)
+    ingest_quality_gate_enabled: bool = True     # Stage 7: 품질 검증·차단 (규칙)
+    ingest_chunk_target_tokens: int = 350        # 청크 목표 토큰
+    ingest_chunk_max_tokens: int = 512           # 청크 최대 토큰 (임베더 한도)
+    ingest_chunk_min_tokens: int = 50            # 이 미만은 인접 청크에 병합
+    ingest_restructure_window_chars: int = 3000  # 구조화 LLM 윈도우 크기
 
     # ---- 기타 ----
     data_dir: str = "data/documents"

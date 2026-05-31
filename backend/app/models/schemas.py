@@ -23,7 +23,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal, Optional  # ✏️ AI-CHANGE 2026-05-25 [Claude]: Literal 추가 — target_lang 타입 안전성
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ===== G-1: 분류 Enum + InputClassification =====
@@ -76,8 +76,15 @@ TargetLang = Literal["ko", "en", "zh"]
 
 
 class ChatRequest(BaseModel):
-    query: str
+    query: str = Field(..., description="사용자 질문 (공백 불가)")
     history: list[ChatMessage] = Field(default_factory=list)
+
+    @field_validator("query")
+    @classmethod
+    def query_not_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("query must not be empty or whitespace-only")
+        return v
     llm_provider: Optional[str] = None       # 런타임에 LLM 스왑
     embedder: Optional[str] = None            # 런타임에 임베더 스왑
     user_id: Optional[str] = None             # Langfuse user 추적용

@@ -39,7 +39,6 @@ TIER_FEATURES = {
     "tier_0": {
         "external_access": False,
         "cloudflare_tunnel": False,
-        "invite_codes": False,
         "kakao_oauth": False,
         "crisis_router": False,
         "payment": False,
@@ -52,7 +51,6 @@ TIER_FEATURES = {
     "tier_0_5": {
         "external_access": True,  # ✅ Cloudflare Tunnel
         "cloudflare_tunnel": True,
-        "invite_codes": True,     # ✅ 베타 초대 코드
         "kakao_oauth": False,
         "crisis_router": False,   # 시범 단계 (운영자 직접 모니터)
         "payment": False,
@@ -65,7 +63,6 @@ TIER_FEATURES = {
     "tier_1": {
         "external_access": True,
         "cloudflare_tunnel": True,
-        "invite_codes": True,
         "kakao_oauth": False,     # 준비 (아직 활성화 X)
         "crisis_router": True,    # ✅ 위기 라우팅 자동 활성화
         "payment": False,
@@ -78,7 +75,6 @@ TIER_FEATURES = {
     "tier_1_5": {
         "external_access": True,
         "cloudflare_tunnel": True,
-        "invite_codes": True,
         "kakao_oauth": True,      # ✅ OAuth 정식 운영
         "crisis_router": True,
         "payment": False,         # 준비 (아직 활성화 X)
@@ -91,7 +87,6 @@ TIER_FEATURES = {
     "tier_2": {
         "external_access": True,
         "cloudflare_tunnel": True,
-        "invite_codes": True,
         "kakao_oauth": True,
         "crisis_router": True,
         "payment": True,          # ✅ 결제 기능
@@ -104,7 +99,6 @@ TIER_FEATURES = {
     "tier_3": {
         "external_access": True,
         "cloudflare_tunnel": True,
-        "invite_codes": True,
         "kakao_oauth": True,
         "crisis_router": True,
         "payment": True,
@@ -198,4 +192,4 @@ if __name__ == "__main__":
     # 예시 4: 현재 Tier 의 모든 활성 기능
     enabled = FeatureFlags.get_enabled_features()
     print(f"현재 Tier 활성 기능: {[k for k, v in enabled.items() if v]}")
-    # 출력: 현재 Tier 활성 기능: ['external_access', 'cloudflare_tunnel', 'invite_codes']
+    # 출력: 현재 Tier 활성 기능: ['external_access', 'cloudflare_tunnel', ...]

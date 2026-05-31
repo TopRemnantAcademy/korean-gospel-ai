@@ -48,7 +48,10 @@ class CohereReranker(BaseReranker):
             import cohere  # type: ignore
         except ImportError as e:
             raise ImportError("cohere 패키지가 필요합니다. pip install cohere") from e
-        self._co = cohere.Client(api_key=api_key)
+        # 클라이언트는 connections.py 레지스트리에서 가져옴 (싱글턴)
+        from ..connections import connections
+        client = connections.cohere()
+        self._co = client if client is not None else cohere.Client(api_key=api_key)
         self._model = model
 
     def rerank(self, query: str, docs: Sequence[str]) -> list[float]:

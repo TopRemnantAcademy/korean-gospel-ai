@@ -11,9 +11,14 @@ class GeminiLLM(BaseLLM):
     def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         if not api_key:
             raise ValueError("GOOGLE_API_KEY 가 설정되어 있지 않습니다.")
-        # 새 google-genai SDK (구 google-generativeai와 다름)
-        from google import genai
-        self._client = genai.Client(api_key=api_key)
+        # 클라이언트는 connections.py 레지스트리에서 가져옴 (싱글턴)
+        from ...connections import connections
+        client = connections.gemini()
+        if client is None:
+            # fallback: 직접 초기화 (connections 미사용 경로)
+            from google import genai  # type: ignore
+            client = genai.Client(api_key=api_key)
+        self._client = client
         self._model = model
 
     @property

@@ -64,6 +64,18 @@ class RetrievedItem:
     metadata: dict
 
 
+# 임베더 이름별 retriever 캐시 — 매 요청마다 embedder/store/reranker 재생성 방지
+_retriever_cache: dict[str, "HybridRetriever"] = {}
+
+
+def get_retriever(embedder_name: str | None = None) -> "HybridRetriever":
+    """모듈-레벨 캐시에서 retriever 반환. 없으면 생성 후 캐시."""
+    key = embedder_name or settings.embedder
+    if key not in _retriever_cache:
+        _retriever_cache[key] = HybridRetriever(embedder_name=embedder_name)
+    return _retriever_cache[key]
+
+
 class HybridRetriever:
     def __init__(self, embedder_name: str | None = None, reranker: BaseReranker | None = None):
         self.embedder_name = embedder_name or settings.embedder
@@ -82,30 +94,46 @@ class HybridRetriever:
         dense_weight: float | None = None,
         sparse_weight: float | None = None,
         profile: Any = None,
+        dense_query: str | None = None,   # V3: HyDE 확장 dense 질의 (None=원질의)
+        sparse_query: str | None = None,  # V3: 키워드 추출 sparse 질의 (None=원질의)
     ) -> list[RetrievedItem]:  # noqa: E501
+        import asyncio as _asyncio
+
         top_k = top_k or settings.retrieval_top_k
         rerank_top_n = rerank_top_n or settings.rerank_top_n
-
-        # 1) Dense
-        qv = self.embedder.embed_query(query).tolist()
-        dense_hits = self.store.search_dense(qv, top_k=top_k)
-
-        # 2) Sparse (server 모드만)
-        sparse_hits = self.store.search_sparse(query, top_k=top_k)
-
-        # 3) RRF fusion (sparse 없으면 dense만)
-        rankings = [dense_hits] + ([sparse_hits] if sparse_hits else [])
         dw = dense_weight if dense_weight is not None else settings.dense_weight
         sw = sparse_weight if sparse_weight is not None else settings.sparse_weight
-        weights = ([dw, sw] if sparse_hits else [1.0])
-        fused = _rrf_fusion(rankings, weights=weights, k=60)
+
+        # ⚡ 1-3) 동기 CPU/IO 작업을 스레드 풀에서 실행 (이벤트 루프 블로킹 방지)
+        #        → asyncio.gather(classify_input, retrieve)가 진정한 병렬로 동작
+        _embedder = self.embedder
+        _store = self.store
+
+        _collection = _store.collection
+
+        def _sync_search():
+            # 임베딩 대상: HyDE 등으로 확장된 dense 질의가 있으면 사용, 없으면 원질의
+            _dense_q = dense_query or query
+            qv = _embedder.embed_query(_dense_q).tolist()   # KURE CPU embedding
+            dense = _store.search_dense(qv, top_k=top_k)     # Qdrant dense
+
+            # Sparse: Qdrant 서버 BM42 우선, embedded 면 자체 Kiwi+BM25 인덱스 사용 (V2)
+            sparse = _store.search_sparse(query, top_k=top_k)
+            if not sparse:
+                sparse = _bm25_sparse(_collection, sparse_query or query, top_k)
+
+            rankings = [dense] + ([sparse] if sparse else [])
+            weights = ([dw, sw] if sparse else [1.0])
+            return _rrf_fusion(rankings, weights=weights, k=60)
+
+        fused = await _asyncio.to_thread(_sync_search)
         if not fused:
             return []
 
-
-        # 4) Rerank
-        topN = fused[: max(rerank_top_n * 3, rerank_top_n)]
-        rerank_scores = self.reranker.rerank(query, [it["point"].text for it in topN])
+        # 4) Rerank (RERANKER=none이면 즉시 반환, bge_m3이면 스레드에서 실행)
+        topN = fused[: max(rerank_top_n * 2, rerank_top_n)]
+        _docs = [it["point"].text for it in topN]
+        rerank_scores = await _asyncio.to_thread(self.reranker.rerank, query, _docs)
         for it, s in zip(topN, rerank_scores):
             it["rerank_score"] = s
         topN.sort(key=lambda it: it["rerank_score"], reverse=True)
@@ -128,7 +156,8 @@ class HybridRetriever:
         # C6: 사용자 프로필 기반 매칭 가중치 (Boost)
         # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: profile.xxx → profile.get("xxx") dict 접근 (B5/A2 fix)
         # ✏️ AI-CHANGE 2026-05-26 [Claude]: D-C16 — SALVATION_BOOST_MATRIX + DARAKBANG_BOOST_MATRIX 추가
-        if profile:
+        # ✏️ AI-CHANGE 2026-05-27 [Claude]: settings.retriever_boost_enabled 플래그로 boost on/off 가능
+        if profile and settings.retriever_boost_enabled:
             salvation_status = profile.get("salvation_status", "unknown")
             darakbang_role = profile.get("darakbang_role") if profile.get("is_darakbang_member") else None
             darakbang_verified = profile.get("darakbang_verified", False)
@@ -215,6 +244,28 @@ class HybridRetriever:
 
 
 
+
+
+def _bm25_sparse(collection: str, query: str, top_k: int) -> list:
+    """자체 Kiwi+BM25 인덱스로 sparse 검색 → RetrievedPoint 리스트 (V2).
+
+    embedded Qdrant 가 BM42 를 못 쓸 때 정확어·성경장절 검색을 부활시킨다.
+    인덱스가 비어있으면 [] 반환 (dense-only 로 graceful fallback).
+    """
+    try:
+        from .sparse_index import get_index
+        idx = get_index(collection)
+        if idx.size() == 0:
+            return []
+        hits = idx.search(query, top_k=top_k)
+        out = []
+        for chunk_id, score, payload in hits:
+            payload = dict(payload)
+            text = payload.pop("text", "")
+            out.append(RetrievedPoint(id=str(chunk_id), score=score, text=text, metadata=payload))
+        return out
+    except Exception:
+        return []
 
 
 def _rrf_fusion(rankings, *, weights=None, k=60):

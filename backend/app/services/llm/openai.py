@@ -18,7 +18,10 @@ class OpenAILLM(BaseLLM):
                 "openai 패키지가 설치되어 있지 않습니다. "
                 "requirements.txt에서 'openai' 주석을 해제하고 pip install 하세요."
             ) from e
-        self._client = AsyncOpenAI(api_key=api_key)
+        # 클라이언트는 connections.py 레지스트리에서 가져옴 (싱글턴)
+        from ...connections import connections
+        client = connections.openai_client()
+        self._client = client if client is not None else AsyncOpenAI(api_key=api_key)
         self._model = model
 
     @property

@@ -35,7 +35,7 @@ DEFAULT_TABLE_ORDER = [
     "conversation_history",
     "salvation_journey",
     "audit_log",
-    "invite_code",
+
     "document_chunk",
     "glossary_entry",
     "draft",

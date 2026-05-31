@@ -14,12 +14,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import settings
 from .db import init_db
+from .logging_setup import setup_logging
 
-
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+# 파일 로테이션 로깅 초기화 (logs/backend.log, logs/errors.log)
+setup_logging(settings.log_level)
 log = logging.getLogger("gospel-api")
 
 
@@ -42,6 +40,14 @@ def create_app() -> FastAPI:
     # Request ID 미들웨어 (가장 바깥에 — 모든 요청에 적용)
     app.add_middleware(RequestIDMiddleware)
 
+    # 에러 모니터링 미들웨어 (가장 안쪽 — 실제 요청 처리에 가깝게)
+    try:
+        from .middleware.error_monitor import ErrorMonitorMiddleware
+        app.add_middleware(ErrorMonitorMiddleware)
+        log.info("[OK] ErrorMonitorMiddleware registered")
+    except Exception as e:
+        log.warning("[WARN] ErrorMonitorMiddleware 등록 실패 (무시): %s", e)
+
     # E-B2: Rate Limit 미들웨어 (CORS 보다 바깥에 등록 → 먼저 실행)
     try:
         from .middleware.rate_limit import RateLimitMiddleware
@@ -62,8 +68,40 @@ def create_app() -> FastAPI:
     init_db()
     log.info("[OK] DB initialized")
 
+    # ── 시작 시 DB 컬럼 자동 보정 (ORM vs 실제 DB 불일치 방지)
     try:
-        from .api import chat, retrieval, eval as eval_api, admin, documents, memory, prompts, subscriber, invite_codes, auth, glossary, drafts
+        from sqlalchemy import inspect as _inspect, text as _text
+        from .db import Base as _Base, engine as _engine
+        from .models import orm as _orm_module  # noqa — 모델 등록
+        _insp = _inspect(_engine)
+        _existing = set(_insp.get_table_names())
+        _patched = []
+        with _engine.connect() as _conn:
+            for _tbl in _Base.metadata.sorted_tables:
+                if _tbl.name not in _existing:
+                    _tbl.create(bind=_engine)
+                    _patched.append(f"+TABLE:{_tbl.name}")
+                    continue
+                _ecols = {c["name"] for c in _insp.get_columns(_tbl.name)}
+                for _col in _tbl.columns:
+                    if _col.name not in _ecols:
+                        _dtype = str(_col.type).upper()
+                        _sql = f'ALTER TABLE "{_tbl.name}" ADD COLUMN "{_col.name}" {_dtype}'
+                        try:
+                            _conn.execute(_text(_sql))
+                            _conn.commit()
+                            _patched.append(f"+COL:{_tbl.name}.{_col.name}")
+                        except Exception as _ce:
+                            log.warning("[DB-PATCH] skip %s.%s: %s", _tbl.name, _col.name, _ce)
+        if _patched:
+            log.warning("[DB-PATCH] 자동 컬럼 추가: %s", _patched)
+        else:
+            log.info("[DB-PATCH] 스키마 일치 ✅")
+    except Exception as _e:
+        log.error("[DB-PATCH] 자동 마이그레이션 실패: %s", _e)
+
+    try:
+        from .api import chat, retrieval, eval as eval_api, admin, documents, memory, prompts, subscriber, auth, glossary, drafts, jobs
         app.include_router(chat.router)
         app.include_router(retrieval.router)
         app.include_router(eval_api.router)
@@ -72,11 +110,11 @@ def create_app() -> FastAPI:
         app.include_router(memory.router)
         app.include_router(prompts.router)
         app.include_router(subscriber.router)
-        app.include_router(invite_codes.router)
         app.include_router(auth.router)
         app.include_router(glossary.router)
         app.include_router(drafts.router)
-        log.info("[OK] routers: chat, retrieval, eval, admin, documents, subscriber, invite_codes, auth, glossary, drafts")
+        app.include_router(jobs.router)
+        log.info("[OK] routers: chat, retrieval, eval, admin, documents, subscriber, auth, glossary, drafts, jobs")
     except Exception as e:
         log.exception("[FATAL] router registration failed: %s", e)
         raise
@@ -112,6 +150,62 @@ def create_app() -> FastAPI:
             log.warning("⚠️  SECURITY: admin_api_key 가 기본값입니다. .env 에서 반드시 변경하세요!")
         if settings.dify_api_key == "change-me":
             log.warning("⚠️  SECURITY: dify_api_key 가 기본값입니다.")
+
+        # embedded Qdrant 스테일 잠금 파일 자동 정리
+        # 비정상 종료 시 .lock 파일이 남아 재시작 시 "already accessed" 오류 발생 방지
+        try:
+            _q_url = (settings.qdrant_url or "").strip()
+            if _q_url.startswith("local:"):
+                from pathlib import Path as _Path
+                _raw = _q_url.split(":", 1)[1] or "./.qdrant_local"
+                _q_dir = (_Path(settings.root_dir) / _raw).resolve()
+                _lock_file = _q_dir / ".lock"
+                if _lock_file.exists():
+                    _lock_file.unlink()
+                    log.warning("[STARTUP] 스테일 Qdrant 잠금 파일 삭제: %s", _lock_file)
+                else:
+                    log.info("[STARTUP] Qdrant 잠금 파일 없음 ✅")
+        except Exception as _le:
+            log.warning("[STARTUP] Qdrant 잠금 파일 정리 실패 (무시): %s", _le)
+
+        # 중앙 연결 레지스트리 상태 로깅 (connections.py)
+        try:
+            from .connections import connections
+            connections.log_status()
+        except Exception as _ce:
+            log.warning("[STARTUP] connections 상태 확인 실패: %s", _ce)
+
+        # 이전 서버 실행 중 미완료된 background 잡 자동 실패 처리
+        # (재시작 시 asyncio 태스크가 모두 소멸 → pending/running 잡이 영원히 남는 문제 방지)
+        try:
+            from .services import job_service as _js
+            _cleaned = _js.cleanup_stale_jobs(older_than_minutes=30)
+            if _cleaned > 0:
+                log.warning("[STARTUP] 미완료 백그라운드 작업 %d개 자동 실패 처리 완료", _cleaned)
+            else:
+                log.info("[STARTUP] 미완료 작업 없음 ✅")
+        except Exception as _e:
+            log.warning("[STARTUP] 잡 정리 실패 (무시): %s", _e)
+
+        # ⚡ 임베딩 모델 사전 로딩 — 첫 요청 지연(~10s) 방지
+        import asyncio as _asyncio
+
+        async def _warmup_models():
+            try:
+                from .services.retriever import get_retriever as _gr
+                _r = _gr()
+                await _asyncio.to_thread(_r.embedder.embed_query, "warmup")
+                log.info("[STARTUP] ✅ KURE 임베딩 모델 사전 로딩 완료")
+                # V2: 자체 BM25 sparse 인덱스를 Qdrant 에서 재구축 (하이브리드 검색)
+                from .services.sparse_index import rebuild_from_qdrant as _rebuild
+                _n = await _asyncio.to_thread(_rebuild, _r.store.collection, _r.store.client)
+                log.info("[STARTUP] ✅ BM25 sparse 인덱스 재구축: %d개 청크", _n)
+            except Exception as _we:
+                log.warning("[STARTUP] 모델 사전 로딩 실패 (무시): %s", _we)
+
+        _asyncio.create_task(_warmup_models())
+        log.info("[STARTUP] KURE 임베딩 사전 로딩 시작 (백그라운드)…")
+
         log.info("=" * 60)
 
     return app

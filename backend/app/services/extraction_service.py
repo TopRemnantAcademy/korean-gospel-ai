@@ -6,11 +6,17 @@
 - TXT/MD: utf-8
 - 한국어 인코딩 깨짐 감지
 - 설교 transcript 노이즈([박수], [아멘] 등) 자동 제거 + 경고
+
+progress_cb(current, total, detail) — 진행 콜백 (None 이면 무시).
+  current: 처리 완료 페이지/항목 수
+  total: 전체 수
+  detail: 화면에 표시할 짧은 텍스트
 """
 from __future__ import annotations
 import io
 import re
 from dataclasses import dataclass
+from typing import Callable, Optional as Opt
 
 # 설교/강의 transcript 노이즈 패턴
 NOISE_PATTERNS = [
@@ -29,12 +35,15 @@ class ExtractionResult:
     char_count: int
 
 
-def extract(filename: str, raw: bytes) -> ExtractionResult:
+ProgressCb = Opt[Callable[[int, int, str], None]]
+
+
+def extract(filename: str, raw: bytes, progress_cb: ProgressCb = None) -> ExtractionResult:
     suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     warnings: dict = {}
 
     if suffix == "pdf":
-        text = _extract_pdf(raw, warnings)
+        text = _extract_pdf(raw, warnings, progress_cb=progress_cb)
     elif suffix == "docx":
         text = _extract_docx(raw, warnings)
     elif suffix in {"txt", "md"}:
@@ -70,16 +79,30 @@ def extract(filename: str, raw: bytes) -> ExtractionResult:
     )
 
 
-def _extract_pdf(raw: bytes, warnings: dict) -> str:
+_PDF_PAGE_LIMIT = 150   # 150p 초과 시 잘라서 경고 — 타임아웃 방지
+
+
+def _extract_pdf(raw: bytes, warnings: dict, progress_cb: ProgressCb = None) -> str:
     try:
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(raw))
+        total_pages = len(reader.pages)
+        extract_limit = min(total_pages, _PDF_PAGE_LIMIT)
+        if total_pages > _PDF_PAGE_LIMIT:
+            warnings["pdf_truncated"] = {
+                "total_pages": total_pages,
+                "extracted_pages": _PDF_PAGE_LIMIT,
+                "reason": f"페이지 상한({_PDF_PAGE_LIMIT}p) 초과 — 나머지 {total_pages - _PDF_PAGE_LIMIT}p 건너뜀",
+            }
         pages = []
-        for i, p in enumerate(reader.pages):
+        for i, p in enumerate(reader.pages[:extract_limit]):
             try:
                 pages.append(p.extract_text() or "")
             except Exception as e:
                 warnings.setdefault("pdf_page_errors", []).append({"page": i, "err": str(e)[:80]})
+            # 진행 콜백 — 5페이지마다 또는 마지막 페이지에서 호출
+            if progress_cb and (i % 5 == 0 or i == extract_limit - 1):
+                progress_cb(i + 1, extract_limit, f"{i + 1}/{extract_limit} 페이지 완료")
         return "\n\n".join(pages)
     except Exception as e:
         warnings["pdf_error"] = str(e)[:200]

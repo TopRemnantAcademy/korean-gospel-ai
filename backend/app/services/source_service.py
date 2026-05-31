@@ -33,6 +33,7 @@ def ingest_file(
     filename: str,
     raw: bytes,
     uploaded_by: str = "admin",
+    progress_cb=None,   # Optional[Callable[[int, int, str], None]] — 페이지 진행 콜백
 ) -> tuple[SourceArtifact, bool]:
     """파일을 받아 L1 artifact 생성.
     Returns (artifact, is_new) — is_new=False면 같은 hash가 이미 있음.
@@ -43,7 +44,7 @@ def ingest_file(
         return existing, False
 
     # 추출
-    res = extraction_service.extract(filename, raw)
+    res = extraction_service.extract(filename, raw, progress_cb=progress_cb)
 
     # 원본 파일 저장
     storage_path = UPLOADS_DIR / f"{content_hash[:12]}_{Path(filename).name}"
