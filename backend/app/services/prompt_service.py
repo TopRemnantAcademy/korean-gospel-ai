@@ -3,6 +3,7 @@
 current() 가 항상 1개의 활성 프롬프트를 반환. 없으면 코드 기본값 사용.
 """
 from __future__ import annotations
+import time as _time
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -11,19 +12,34 @@ from ..db import get_session
 from ..models.orm import PromptTemplate
 from ..prompts.system import GOSPEL_SYSTEM_PROMPT as DEFAULT_PROMPT
 
+# 60초 TTL 인-메모리 캐시 — 요청마다 DB 조회 방지
+_cache_text: str | None = None
+_cache_expires: float = 0.0
+
+
+def _invalidate_cache() -> None:
+    global _cache_text, _cache_expires
+    _cache_text = None
+    _cache_expires = 0.0
+
 
 def current_text() -> str:
-    """현재 활성 프롬프트 텍스트. DB에 없으면 코드 기본값."""
+    """현재 활성 프롬프트 텍스트. DB에 없으면 코드 기본값. 60초 TTL 캐시 적용."""
+    global _cache_text, _cache_expires
+    now = _time.monotonic()
+    if _cache_text is not None and now < _cache_expires:
+        return _cache_text
     try:
         with get_session() as s:
             row = s.query(PromptTemplate).filter(PromptTemplate.active == True).order_by(
                 PromptTemplate.updated_at.desc()
             ).first()
-            if row:
-                return row.content
+            result = row.content if row else DEFAULT_PROMPT
     except Exception:
-        pass
-    return DEFAULT_PROMPT
+        result = DEFAULT_PROMPT
+    _cache_text = result
+    _cache_expires = now + 60.0
+    return result
 
 
 def current_detail() -> dict:
@@ -58,6 +74,7 @@ def current_detail() -> dict:
 
 def save(content: str, *, name: str = "gospel_default", note: Optional[str] = None, who: str = "admin") -> dict:
     """현재 활성을 비활성화하고 새 활성으로 저장 (이력 보존)."""
+    _invalidate_cache()
     with get_session() as s:
         # 모두 비활성
         s.query(PromptTemplate).filter(PromptTemplate.active == True).update(
@@ -79,6 +96,7 @@ def save(content: str, *, name: str = "gospel_default", note: Optional[str] = No
 
 def reset_to_default(who: str = "admin") -> dict:
     """모든 커스텀 비활성화 → 코드 기본값으로 돌아감."""
+    _invalidate_cache()
     with get_session() as s:
         s.query(PromptTemplate).filter(PromptTemplate.active == True).update(
             {"active": False}

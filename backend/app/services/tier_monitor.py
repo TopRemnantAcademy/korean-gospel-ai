@@ -85,28 +85,28 @@ class TierMonitor:
         self.usage_history = []  # 최근 100개 기록
         self.alert_history = []  # 최근 50개 알림
     
-    async def measure(self) -> TierUsage:
-        """현재 리소스 사용량 실측."""
-        subscriber_count = self._count_subscribers()
-        db_size_mb = self._db_size_mb()
-        qdrant_index_mb = self._qdrant_size_mb()
-
+    def measure_sync(self) -> TierUsage:
+        """현재 리소스 사용량 실측 (동기 버전).
+        Streamlit 등 이미 이벤트 루프가 실행 중인 컨텍스트에서 사용.
+        """
         usage = TierUsage(
             timestamp=datetime.now().isoformat(),
-            subscriber_count=subscriber_count,
-            active_sessions=0,  # 세션 추적 미구현 — 향후 Redis 기반으로 대체
-            db_size_mb=db_size_mb,
-            qdrant_index_mb=qdrant_index_mb,
-            daily_llm_cost_usd=0.0,  # 토큰 사용량 집계 미구현 — E-A tokens_lifetime_used 활용 예정
+            subscriber_count=self._count_subscribers(),
+            active_sessions=0,  # 향후 Redis 기반으로 대체
+            db_size_mb=self._db_size_mb(),
+            qdrant_index_mb=self._qdrant_size_mb(),
+            daily_llm_cost_usd=0.0,  # 향후 E-A tokens_lifetime_used 집계로 대체
             streamlit_response_time_ms=0.0,
             warnings=[],
         )
-
         self.usage_history.append(usage)
         if len(self.usage_history) > 100:
             self.usage_history = self.usage_history[-100:]
-
         return usage
+
+    async def measure(self) -> TierUsage:
+        """현재 리소스 사용량 실측 (비동기 버전)."""
+        return self.measure_sync()
 
     def _count_subscribers(self) -> int:
         try:

@@ -21,8 +21,15 @@ class HfInferenceEmbedder(BaseEmbedder):
 
     def __init__(self, model_id: str | None = None):
         self._model_id = model_id or self.model_id
+        # connections.py 레지스트리에서 HF 설정 가져옴
+        from ...connections import connections
+        _cfg = connections.hf_inference()
         self._token = settings.hf_token
-        self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{self._model_id}"
+        self._api_url = (
+            _cfg["url"] if _cfg
+            else f"https://api-inference.huggingface.co/pipeline/feature-extraction/{self._model_id}"
+        )
+        self._headers = _cfg["headers"] if _cfg else {"Authorization": f"Bearer {self._token}"}
         self._dim = 1024  # KURE-v1 고정 차원
 
     @property
@@ -35,13 +42,12 @@ class HfInferenceEmbedder(BaseEmbedder):
                 "Hugging Face Token is missing. Please set HF_TOKEN in your environment/secrets."
             )
 
-        headers = {"Authorization": f"Bearer {self._token}"}
         # options.wait_for_model=True는 첫 로드 시 모델 부팅을 대기하도록 강제함 (cold start 방지)
         payload = {"inputs": texts, "options": {"wait_for_model": True}}
 
         try:
             with httpx.Client(timeout=60.0) as client:
-                response = client.post(self._api_url, headers=headers, json=payload)
+                response = client.post(self._api_url, headers=self._headers, json=payload)
                 if response.status_code != 200:
                     log.error(f"HF Inference API Error [{response.status_code}]: {response.text}")
                     response.raise_for_status()

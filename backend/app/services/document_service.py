@@ -248,7 +248,7 @@ def validate_version(session: Session, *, version: DocumentVersion, who: str = "
 
 def archive_document(session: Session, *, doc: Document, who: str = "admin"):
     from datetime import datetime
-    doc.archived_at = datetime.utcnow()
+    doc.archived_at = datetime.now(datetime.UTC)
     for v in doc.versions:
         if v.state == DocVersionState.published.value:
             v.state = DocVersionState.archived.value

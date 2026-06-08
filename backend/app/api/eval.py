@@ -18,7 +18,6 @@ from ..services.eval_set_generator import (
     save_questions,
 )
 from ..services.hybrid_tuner import tune_hybrid_weights
-from ..services.document_indexer import index_documents_folder
 
 router = APIRouter(prefix="/eval", tags=["eval"])
 
@@ -111,15 +110,5 @@ async def tune_weights(
         trials=result.get("trials", []),
         env_hint=env_hint,
     )
-
-
-@router.post("/index-documents")
-async def index_documents(
-    authorization: Optional[str] = Header(default=None),
-    reset: bool = False,
-):
-    """data/documents txt/md → Qdrant (검색·평가용)."""
-    _check_admin(authorization)
-    return index_documents_folder(reset=reset)
 
 

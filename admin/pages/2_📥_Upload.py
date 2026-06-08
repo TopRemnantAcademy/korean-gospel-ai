@@ -1,7 +1,7 @@
-"""Upload - 새 자료 올리기 (단순화 + 친근)."""
+"""Upload - 자료 등록 (직접 입력 / inbox 폴더 / 파일 업로드)."""
 from __future__ import annotations
 
-import sys
+import sys, json, time
 from pathlib import Path
 _ROOT = Path(__file__).resolve().parent
 while _ROOT.name in ("pages", "lib"):
@@ -13,19 +13,20 @@ if str(_ROOT) not in sys.path:
 import os
 import streamlit as st
 from dotenv import load_dotenv
-
 load_dotenv(_ROOT / ".env")
 
-from admin.lib.api_client import upload_document
+from admin.lib.api_client import (
+    ingest_text_async, list_inbox, ingest_inbox_async,
+    upload_document_async, get_job, check_backend_health, API_BASE,
+    publish_version_async, patch_meta, patch_doc_meta, patch_body, get_document,
+)
 from admin.lib.auth import gate
 
 gate(os.getenv("APP_PASSWORD", ""))
 
-st.set_page_config(page_title="새 자료 올리기", page_icon="📥", layout="wide")
-st.title("📥 새 자료 올리기")
-st.caption("완성된 자료를 올립니다. 큰 수정은 외부 편집 후 다시 올려주세요. (= 자동으로 새 버전 생성)")
+st.set_page_config(page_title="자료 등록", page_icon="📥", layout="wide")
+st.title("📥 자료 등록")
 
-# 친근한 문서 유형 이름 매핑
 DOC_TYPE_LABELS = {
     "sermon": "설교",
     "book": "책 / 신학서",
@@ -38,194 +39,364 @@ DOC_TYPE_LABELS = {
 DOC_TYPE_OPTIONS = list(DOC_TYPE_LABELS.values())
 DOC_TYPE_REV = {v: k for k, v in DOC_TYPE_LABELS.items()}
 
-# === 업로드 성공 결과 표시 ===
-if "last_upload" in st.session_state and st.session_state.last_upload:
+
+# ═══════════════════════════════════════════════════════════════
+# 헬퍼: 폴링 진행 상황 표시 (세 가지 방식 공통)
+# ═══════════════════════════════════════════════════════════════
+def _show_progress_and_poll(job_id: str, is_inbox: bool = False):
+    """세션에 job_id 있으면 진행바 표시 → 완료 시 결과 저장 후 rerun."""
+    if "upload_poll_start" not in st.session_state:
+        st.session_state.upload_poll_start = time.time()
+    _poll_sec = int(time.time() - st.session_state.get("upload_poll_start", time.time()))
+
+    job = get_job(job_id)
+
+    # ── 오류 ──────────────────────────────────────────────────────
+    if job.get("__error__") or job.get("__not_found__"):
+        _err_type = job.get("error_type", "unknown")
+        _err_msg  = job.get("message", "알 수 없는 오류")
+
+        if _err_type == "timeout":
+            st.error("⏱ 서버가 응답하지 않아요 — 터미널에서 재시작해주세요")
+            st.code("uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload", language="bash")
+        elif _err_type == "connection":
+            st.error(f"🔌 서버 연결 불가 — `{API_BASE}` 실행 중인지 확인")
+        else:
+            st.error(f"❌ {_err_msg}")
+
+        with st.expander("🔍 상세 진단"):
+            st.markdown(f"- URL: `{API_BASE}`  |  오류: `{_err_type}`  |  폴링 경과: `{_poll_sec}초`")
+            st.code(_err_msg)
+            if st.button("🏥 서버 상태 확인", key="hc_btn"):
+                h = check_backend_health()
+                st.success(f"✅ {h['latency_ms']}ms") if h["ok"] else st.error(h.get("message"))
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("↩ 처음으로", key="poll_reset", type="primary"):
+                st.session_state.upload_job_id = None
+                st.session_state.pop("upload_poll_start", None)
+                st.rerun()
+        with col2:
+            if st.button("🔄 다시 조회", key="poll_retry"):
+                st.rerun()
+        return True   # 처리됨
+
+    # ── 실패 ──────────────────────────────────────────────────────
+    if job.get("status") == "failed":
+        err = (job.get("error_json") or {}).get("error", "알 수 없는 오류")
+        st.error(f"❌ 처리 실패: {err}")
+        with st.expander("📋 오류 상세"):
+            st.code((job.get("error_json") or {}).get("traceback", "없음"), language="python")
+        if st.button("다시 시도", key="fail_retry"):
+            st.session_state.upload_job_id = None
+            st.session_state.pop("upload_poll_start", None)
+            st.rerun()
+        return True
+
+    # ── 완료 ──────────────────────────────────────────────────────
+    if job.get("status") == "done":
+        result = job.get("result_json") or {}
+        if is_inbox:
+            st.session_state.inbox_result = result
+        else:
+            # ▶ 자동 공개: doc_id + version_id 있으면 즉시 publish 요청
+            _doc_id = result.get("doc_id") or result.get("id")
+            _ver_id = result.get("version_id")
+            if _doc_id and _ver_id and result.get("state") != "published":
+                _pub = publish_version_async(_doc_id, _ver_id)
+                if _pub and _pub.get("job_id"):
+                    result["_auto_publish_job"] = _pub["job_id"]
+                result["state"] = "published"  # 낙관적 UI 업데이트
+            st.session_state.last_upload = result
+        st.session_state.upload_job_id = None
+        st.session_state.pop("upload_poll_start", None)
+        st.rerun()
+        return True
+
+    # ── 진행 중 ────────────────────────────────────────────────────
+    pct   = job.get("progress_pct", 0)
+    stage = job.get("current_stage") or "처리 중..."
+    detail= job.get("stage_detail") or ""
+
+    _STUCK_SEC = 5 * 60
+    if job.get("status") == "running" and _poll_sec > _STUCK_SEC:
+        st.warning(f"⚠️ {_poll_sec//60}분 이상 진행 중 — 서버가 멈췄을 수 있어요")
+        if st.button("↩ 취소", key="poll_stuck_cancel"):
+            st.session_state.upload_job_id = None
+            st.session_state.pop("upload_poll_start", None)
+            st.rerun()
+
+    st.markdown(f"### ⏳ 처리 중... (`{_poll_sec}초` 경과)")
+    st.progress(pct / 100, text=f"{pct}%  |  {stage}")
+    if detail:
+        st.caption(detail)
+    time.sleep(2)
+    st.rerun()
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════
+# 폴링 중이면 진행 화면 표시 후 stop
+# ═══════════════════════════════════════════════════════════════
+_job_id = st.session_state.get("upload_job_id")
+if _job_id:
+    is_inbox = st.session_state.get("upload_is_inbox", False)
+    _show_progress_and_poll(_job_id, is_inbox=is_inbox)
+    st.stop()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 완료 결과 표시 + 인라인 편집 패널
+# ═══════════════════════════════════════════════════════════════
+if st.session_state.get("last_upload"):
     r = st.session_state.last_upload
-    st.success(f"✅ 업로드 완료: **{r['title']}** (v{r['version_number']}, 상태: `{r['state']}`)")
-    q = r.get("extraction_quality_score", 0)
-    if q >= 80:
-        st.caption(f"📊 추출 품질 {q}/100 (좋음)")
-    elif q >= 50:
-        st.caption(f"📊 추출 품질 {q}/100 (보통 — 검토 권장)")
-    else:
-        st.caption(f"⚠ 추출 품질 {q}/100 (낮음 — 자료실에서 본문 확인 필요)")
+    _doc_id = r.get("doc_id") or r.get("id")
+    _ver_id = r.get("version_id")
+    _q      = r.get("extraction_quality_score", 0)
 
-    # 중복 자료 경고
-    hits = r.get("dup_hits") or []
-    if hits:
-        for h in hits:
-            kind = h.get("kind", "")
-            label = {"identical": "⚠ 완전 동일", "version": "💡 새 버전 후보", "similar": "🔍 유사 자료"}.get(kind, kind)
-            st.warning(f"**{label}** — *{h.get('title','?')}*\n\n{h.get('reason','')}")
+    # ── 상태 배너 ─────────────────────────────────────────────
+    st.success(f"✅ 등록 + 즉시 공개 완료: **{r.get('title')}**  (v{r.get('version_number')})")
+    st.caption(f"📊 추출 품질 {_q}/100  |  🔓 검색 공개 상태  |  🔖 용어 자동 추출 완료")
 
-    if r.get("extraction_warnings"):
-        with st.expander(f"⚠ 추출 경고 ({len(r['extraction_warnings'])}개)"):
-            st.json(r["extraction_warnings"])
+    # ── 중복 경고 ─────────────────────────────────────────────
+    for h in (r.get("dup_hits") or []):
+        _kind = {"identical": "⚠ 완전 동일", "version": "💡 새 버전 후보", "similar": "🔍 유사"}.get(h.get("kind",""), h.get("kind",""))
+        st.warning(f"**{_kind}** — *{h.get('title','?')}*  {h.get('reason','')}")
 
-    if r.get("jsonl_path"):
-        st.caption(f"📄 JSONL 생성됨: `{r['jsonl_path']}`")
+    # ── body 로딩: body_patch 없으면 API 재조회 (1회만) ──────
+    if "_body_loaded" not in st.session_state and _doc_id and _ver_id:
+        _raw_body = r.get("body_patch") or ""
+        if not _raw_body.strip() and _doc_id:
+            with st.spinner("📄 본문 불러오는 중..."):
+                _full = get_document(_doc_id) or {}
+                _versions = _full.get("versions") or []
+                _match = next((v for v in _versions if v.get("version_id") == _ver_id), None)
+                if _match:
+                    _raw_body = _match.get("body_patch") or _match.get("extracted_text_preview") or ""
+                    # document 레벨 필드도 보완
+                    r.setdefault("speaker", _full.get("speaker", ""))
+                    r.setdefault("series",  _full.get("series",  ""))
+        st.session_state.last_upload["body_patch"] = _raw_body
+        st.session_state._body_loaded = True
+        st.rerun()
 
-    # D-C17: 구원 메타 요약 표시
-    _stages = r.get("target_salvation_stage") or []
-    _tier = r.get("darakbang_tier")
-    _score = r.get("salvation_focus_score", 0.0)
-    _core = r.get("gospel_core_tag", False)
-    if _stages or _tier or _score or _core:
-        meta_parts = []
-        if _stages:
-            meta_parts.append(f"단계: `{', '.join(_stages)}`")
-        if _tier:
-            meta_parts.append(f"다락방 등급: `{_tier}`")
-        if _score:
-            meta_parts.append(f"구원 집중도: `{_score:.2f}`")
-        if _core:
-            meta_parts.append("⭐ 구원 핵심 자료")
-        st.caption("🕊 " + " · ".join(meta_parts))
+    # ── 인라인 편집 패널 ──────────────────────────────────────
+    st.markdown("#### ✏️ 내용 수정")
+    st.caption("수정 후 **💾 저장** 을 누르면 즉시 반영됩니다.")
 
-    with st.expander("📄 추출된 본문 미리보기"):
-        st.text(r.get("extracted_text_preview", ""))
+    # list → comma string 변환 (topic_tags, scripture_refs)
+    _tags_init = r.get("topic_tags", [])
+    _refs_init = r.get("scripture_refs", [])
+    _tags_str  = ", ".join(_tags_init) if isinstance(_tags_init, list) else (_tags_init or "")
+    _refs_str  = ", ".join(_refs_init) if isinstance(_refs_init, list) else (_refs_init or "")
 
-    st.info(
-        "🎯 **다음 단계** — 이 자료는 **임시(Draft)** 상태입니다. 검색에 노출하려면:\n\n"
-        "1. 왼쪽 사이드바에서 **📚 Library** 클릭\n"
-        "2. 방금 올린 자료 선택\n"
-        "3. **'검증/Publish' 탭** → 체크리스트 4개 확인 → **'검색에 공개하기'**"
-    )
-    if st.button("✖ 결과 닫기", key="close_result", help="결과창을 닫고 새 자료 업로드 폼으로 돌아갑니다"):
-        st.session_state.last_upload = None
+    with st.container(border=True):
+        _c1, _c2 = st.columns([2, 1])
+        with _c1:
+            _e_title = st.text_input("제목", value=r.get("title", ""), key="edit_title")
+        with _c2:
+            _e_speaker = st.text_input("저자 / 화자", value=r.get("speaker", ""), key="edit_speaker")
+
+        _c3, _c4 = st.columns([2, 1])
+        with _c3:
+            _e_tags = st.text_input("주제 태그 (쉼표 구분)", value=_tags_str, key="edit_tags")
+        with _c4:
+            _e_refs = st.text_input("본문 구절", value=_refs_str, key="edit_refs")
+
+        _e_summary = st.text_area("요약", value=r.get("summary", "") or "", height=80, key="edit_summary")
+        _e_body    = st.text_area(
+            "본문 내용",
+            value=st.session_state.last_upload.get("body_patch", "") or "",
+            height=400,
+            key="edit_body",
+        )
+
+        _sc, _cc = st.columns([3, 1])
+        with _sc:
+            if st.button("💾 저장", type="primary", use_container_width=True, key="edit_save"):
+                _errors = []
+                # ① version 레벨 — 제목·요약·태그·구절
+                if _doc_id and _ver_id:
+                    _ok_meta = patch_meta(_doc_id, _ver_id, {
+                        "title":          _e_title,
+                        "summary":        _e_summary,
+                        "topic_tags":     [t.strip() for t in _e_tags.split(",") if t.strip()],
+                        "scripture_refs": [s.strip() for s in _e_refs.split(",") if s.strip()],
+                    })
+                    if not _ok_meta:
+                        _errors.append("메타 저장 실패")
+
+                    # ② 본문
+                    if _e_body.strip():
+                        _ok_body = patch_body(_doc_id, _ver_id, _e_body)
+                        if not _ok_body:
+                            _errors.append("본문 저장 실패")
+
+                    # ③ document 레벨 — speaker
+                    if _e_speaker.strip() != (r.get("speaker") or ""):
+                        _ok_doc = patch_doc_meta(_doc_id, {"speaker": _e_speaker})
+                        if not _ok_doc:
+                            _errors.append("저자 저장 실패")
+
+                if _errors:
+                    st.error("❌ " + " / ".join(_errors))
+                else:
+                    st.session_state.last_upload.update({
+                        "title":         _e_title,
+                        "speaker":       _e_speaker,
+                        "topic_tags":    [t.strip() for t in _e_tags.split(",") if t.strip()],
+                        "scripture_refs":[s.strip() for s in _e_refs.split(",") if s.strip()],
+                        "summary":       _e_summary,
+                        "body_patch":    _e_body,
+                    })
+                    st.success("✅ 저장 완료")
+                    st.rerun()
+        with _cc:
+            if st.button("✖ 닫기", use_container_width=True, key="close_result"):
+                st.session_state.last_upload = None
+                st.session_state.pop("_body_loaded", None)
+                st.rerun()
+
+    st.divider()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 완료 결과 표시 (inbox 일괄)
+# ═══════════════════════════════════════════════════════════════
+if st.session_state.get("inbox_result"):
+    r = st.session_state.inbox_result
+    sc = r.get("success_count", 0)
+    total = r.get("total", 0)
+    st.success(f"✅ inbox 처리 완료 — {sc}/{total}개 성공")
+    for d in (r.get("done") or []):
+        st.markdown(f"- ✅ **{d.get('title') or d.get('file')}**")
+    for e in (r.get("errors") or []):
+        st.markdown(f"- ❌ `{e.get('file')}` — {e.get('error')}")
+    st.info("📚 **Library** 에서 검토 후 공개하세요.")
+    if st.button("✖ 닫기", key="close_inbox_result"):
+        st.session_state.inbox_result = None
         st.rerun()
     st.divider()
 
 
-# === 업로드 폼 ===
-col1, col2 = st.columns([1, 1])
+# ═══════════════════════════════════════════════════════════════
+# 탭 2개 (inbox 제거 — 직접입력 / 파일업로드)
+# ═══════════════════════════════════════════════════════════════
+tab_text, tab_file = st.tabs(["📝 직접 입력", "⬆ 파일 업로드"])
 
-with col1:
-    st.markdown("#### 1️⃣ 파일")
-    file = st.file_uploader(
-        "PDF · DOCX · TXT · MD 형식 지원",
-        accept_multiple_files=False,
-        key="up_file",
+# ───────────────────────────────────────────────────────────────
+# TAB 1: 직접 입력
+# ───────────────────────────────────────────────────────────────
+with tab_text:
+    st.caption("텍스트나 마크다운을 바로 붙여넣어 등록해요. 등록 즉시 검색에 공개됩니다.")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        txt_title = st.text_input("제목 *", key="txt_title", placeholder="예: 롬5장 — 화평을 누리자")
+        txt_type_label = st.selectbox("자료 종류 *", DOC_TYPE_OPTIONS, key="txt_type")
+        txt_type = DOC_TYPE_REV[txt_type_label]
+    with col2:
+        with st.expander("➕ 추가 정보 (선택)"):
+            txt_series  = st.text_input("시리즈명", key="txt_series")
+            txt_speaker = st.text_input("저자 / 화자", key="txt_speaker")
+            txt_tags    = st.text_input("주제 태그 (쉼표 구분)", key="txt_tags")
+            txt_refs    = st.text_input("본문 구절", key="txt_refs")
+            txt_summary = st.text_area("요약", height=68, key="txt_summary")
+
+    txt_content = st.text_area(
+        "본문 내용 *",
+        height=300,
+        key="txt_content",
+        placeholder=(
+            "여기에 설교 / 자료 내용을 붙여넣거나 직접 입력하세요.\n\n"
+            "마크다운 형식 지원:\n"
+            "# 제목\n## 소제목\n**굵게** *기울임*\n\n"
+            "일반 텍스트도 됩니다."
+        ),
     )
-    if file:
-        st.success(f"✅ {file.name}  ·  {file.size:,} bytes")
-    else:
-        st.caption("👉 클릭하거나 파일을 끌어다 놓으세요")
 
-with col2:
-    st.markdown("#### 2️⃣ 기본 정보")
-    title = st.text_input(
-        "제목 *",
-        key="up_title",
-        placeholder="예: 롬5장 - 화평을 누리자",
-        help="검색 결과에 표시될 자료 제목",
-    )
-    doc_type_label = st.selectbox(
-        "자료 종류 *",
-        DOC_TYPE_OPTIONS,
-        key="up_type_label",
-        help="자료의 성격에 맞게 선택",
-    )
-    doc_type = DOC_TYPE_REV[doc_type_label]
+    _can_txt = bool(txt_title and txt_content and txt_content.strip())
+    if not _can_txt:
+        st.caption("⬆ **제목**과 **본문 내용**을 입력하면 등록할 수 있어요.")
 
-    with st.expander("➕ 추가 정보 (선택)"):
-        series = st.text_input("시리즈명", key="up_series",
-                                placeholder="예: 로마서 강해")
-        speaker = st.text_input("저자 / 화자", key="up_speaker",
-                                 placeholder="예: 홍길동 목사")
-        tags = st.text_input(
-            "주제 태그",
-            key="up_tags",
-            placeholder="예: 화평, 칭의, 고난  (쉼표로 구분)",
+    if st.button("📤 등록 + 즉시 공개", type="primary", disabled=not _can_txt,
+                 key="txt_submit", use_container_width=True):
+        resp = ingest_text_async(
+            title=txt_title, content=txt_content, doc_type=txt_type,
+            series=txt_series or "", speaker=txt_speaker or "",
+            topic_tags=txt_tags or "", scripture_refs=txt_refs or "",
+            summary=txt_summary or "",
         )
-        refs = st.text_input(
-            "본문 구절",
-            key="up_refs",
-            placeholder="예: 롬 5:1, 롬 5:8, 요 3:16",
+        if resp and resp.get("job_id"):
+            st.session_state.upload_job_id = resp["job_id"]
+            st.session_state.upload_is_inbox = False
+            st.rerun()
+        else:
+            st.error("❌ 서버 연결에 실패했어요. API 서버가 실행 중인지 확인하세요.")
+
+# ───────────────────────────────────────────────────────────────
+# TAB 2: 파일 업로드
+# ───────────────────────────────────────────────────────────────
+with tab_file:
+    st.caption("PDF · DOCX · TXT · MD 파일을 직접 업로드해요. (데드락 수정 완료)")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.markdown("#### 파일")
+        file = st.file_uploader(
+            "PDF · DOCX · TXT · MD",
+            accept_multiple_files=False,
+            key="up_file",
         )
-        summary = st.text_area("요약", height=80, key="up_summary",
-                                placeholder="이 자료의 핵심을 한두 줄로")
+        if file:
+            st.success(f"✅ {file.name}  ·  {file.size:,} bytes")
 
-    # D-C17: 구원 상태 메타
-    with st.expander("🕊 구원 단계 / 다락방 분류 (D-C17)", expanded=False):
-        st.caption("검색 시 사용자 구원 상태에 맞는 자료가 우선 노출됩니다.")
+    with col2:
+        st.markdown("#### 기본 정보")
+        title = st.text_input("제목 *", key="up_title", placeholder="예: 롬5장 — 화평을 누리자")
+        doc_type_label = st.selectbox("자료 종류 *", DOC_TYPE_OPTIONS, key="up_type_label")
+        doc_type = DOC_TYPE_REV[doc_type_label]
 
-        _SALVATION_STAGE_OPTIONS = [
-            "seeker", "uncertain", "assured", "mature",
-            "gospel_core", "assurance", "discipleship", "leadership", "pastoral",
-        ]
-        _STAGE_LABELS = {
-            "seeker": "전도 대상 (seeker)",
-            "uncertain": "구원 불확실 (uncertain)",
-            "assured": "구원 확신 (assured)",
-            "mature": "성숙한 신자 (mature)",
-            "gospel_core": "구원 핵심 자료",
-            "assurance": "확신 훈련 자료",
-            "discipleship": "제자도 자료",
-            "leadership": "리더십 자료",
-            "pastoral": "사역자 자료",
-        }
-        selected_stages = st.multiselect(
-            "대상 구원 단계",
-            options=_SALVATION_STAGE_OPTIONS,
-            format_func=lambda x: _STAGE_LABELS.get(x, x),
-            key="up_salvation_stage",
-            help="이 자료가 어떤 구원 단계의 사람에게 적합한지 선택 (복수 가능)",
-        )
+        with st.expander("➕ 추가 정보 (선택)"):
+            series  = st.text_input("시리즈명", key="up_series")
+            speaker = st.text_input("저자 / 화자", key="up_speaker")
+            tags    = st.text_input("주제 태그", key="up_tags", placeholder="쉼표로 구분")
+            refs    = st.text_input("본문 구절", key="up_refs")
+            summary = st.text_area("요약", height=68, key="up_summary")
 
-        _DARAKBANG_TIER_OPTIONS = {
-            "": "일반 자료 (없음)",
-            "darakbang_general": "다락방 일반",
-            "darakbang_deep": "다락방 심화",
-            "darakbang_leader": "다락방 인도자/사역자",
-        }
-        darakbang_tier_label = st.selectbox(
-            "다락방 자료 등급",
-            options=list(_DARAKBANG_TIER_OPTIONS.keys()),
-            format_func=lambda x: _DARAKBANG_TIER_OPTIONS[x],
-            key="up_darakbang_tier",
-            help="다락방 멤버에게만 가중치 적용. 일반 자료면 '없음' 선택.",
-        )
+    st.markdown("---")
+    can_submit = bool(file and title)
+    if not can_submit:
+        st.caption("⬆ 파일과 제목을 모두 입력하면 올릴 수 있어요.")
 
-        salvation_focus_score = st.slider(
-            "구원 집중도 (0.0 ~ 1.0)",
-            min_value=0.0, max_value=1.0, step=0.05, value=0.0,
-            key="up_salvation_focus",
-            help="1.0 = 요한복음 3:16, 로마서 길 같은 직접 구원 자료. 0.0 = 일반 묵상.",
-        )
-
-        gospel_core_tag = st.checkbox(
-            "⭐ 구원 핵심 자료로 표시 (gospel_core_tag)",
-            key="up_gospel_core",
-            value=False,
-            help="체크 시 seeker/uncertain 사용자에게 fallback으로 최우선 노출됩니다.",
-        )
-
-st.markdown("---")
-
-can_submit = bool(file and title)
-if not can_submit:
-    st.caption("⬆ **파일**과 **제목**을 모두 입력하면 올릴 수 있어요.")
-
-if st.button("📤 업로드", type="primary", disabled=not can_submit, key="up_submit", use_container_width=True, help="파일+메타데이터 분석 → Draft 생성. 검색 노출은 Library에서 Publish 후"):
-    with st.spinner("자료를 분석하는 중..."):
-        _stages_csv = ",".join(st.session_state.get("up_salvation_stage") or [])
-        _tier = st.session_state.get("up_darakbang_tier") or ""
-        _focus = st.session_state.get("up_salvation_focus", 0.0)
-        _gospel_core = st.session_state.get("up_gospel_core", False)
-        result = upload_document(
+    if st.button("📤 업로드", type="primary", disabled=not can_submit,
+                 key="up_submit", use_container_width=True):
+        resp = upload_document_async(
             file.name, file.getvalue(),
             title=title, doc_type=doc_type,
-            series=series if 'series' in locals() else "",
-            speaker=speaker if 'speaker' in locals() else "",
-            topic_tags=tags if 'tags' in locals() else "",
-            scripture_refs=refs if 'refs' in locals() else "",
-            summary=summary if 'summary' in locals() else "",
-            target_salvation_stage=_stages_csv,
-            darakbang_tier=_tier,
-            salvation_focus_score=_focus,
-            gospel_core_tag="true" if _gospel_core else "false",
+            series=series if "series" in locals() else "",
+            speaker=speaker if "speaker" in locals() else "",
+            topic_tags=tags if "tags" in locals() else "",
+            scripture_refs=refs if "refs" in locals() else "",
+            summary=summary if "summary" in locals() else "",
         )
-    if result:
-        st.session_state.last_upload = result
-        st.rerun()
+        if resp and resp.get("job_id"):
+            st.session_state.upload_job_id = resp["job_id"]
+            st.session_state.upload_is_inbox = False
+            st.session_state.pop("upload_poll_start", None)
+            st.rerun()
+        else:
+            st.error("❌ 업로드 요청 실패")
+            with st.expander("🔍 서버 상태 확인", expanded=True):
+                h = check_backend_health()
+                if h["ok"]:
+                    st.success(f"✅ 서버 정상 ({h['latency_ms']}ms) — upload API만 실패")
+                else:
+                    htype = h.get("error_type", "")
+                    st.error(h.get("message", ""))
+                    if htype in ("timeout", "connection"):
+                        st.code(
+                            "uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload",
+                            language="bash",
+                        )

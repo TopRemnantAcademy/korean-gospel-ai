@@ -8,11 +8,58 @@
 # Status: COMPLETED
 # =============================================================================
 from __future__ import annotations
+from datetime import datetime
 from typing import Optional, Dict, Any
 
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 from ..db import get_session
 from ..models.orm import Subscriber
+
+
+def _row_to_dict(row: "Subscriber") -> dict:
+    """ORM row → safe dict (세션 밖에서 접근 가능)."""
+    return {
+        "subscriber_id": row.subscriber_id,
+        "journey_stage": row.journey_stage,
+        "faith_stage": row.faith_stage,
+        "emotional_state": row.emotional_state,
+        "current_struggle": row.current_struggle,
+        "preferred_tone": row.preferred_tone,
+        "total_questions": row.total_questions,
+        "onboarding_step": row.onboarding_step,
+        "is_darakbang_member": row.is_darakbang_member,
+        "session_count": row.session_count,
+        "age_group": row.age_group,
+        "gender": row.gender,
+        "last_emotion": row.last_emotion,
+        "email": row.email,
+        "display_name": row.display_name,
+        "auth_status": row.auth_status,
+        "consent_data": row.consent_data,
+        "consent_kakao": row.consent_kakao,
+        "first_seen_at": str(row.first_seen_at) if row.first_seen_at else None,
+        "last_active_at": str(row.last_active_at) if row.last_active_at else None,
+        "topic_interests": row.topic_interests,
+        "salvation_status": row.salvation_status,
+        "salvation_confidence": row.salvation_confidence,
+        "salvation_last_signal_at": str(row.salvation_last_signal_at) if row.salvation_last_signal_at else None,
+        "assume_saved": row.assume_saved,
+        "darakbang_role": row.darakbang_role,
+        "darakbang_chapter": row.darakbang_chapter,
+        "darakbang_joined_at": str(row.darakbang_joined_at) if row.darakbang_joined_at else None,
+        "darakbang_verified": row.darakbang_verified,
+        # 구독/무료체험
+        "subscription_tier": row.subscription_tier or "guest",
+        "trial_expires_at": str(row.trial_expires_at) if row.trial_expires_at else None,
+        "subscribed_at": str(row.subscribed_at) if row.subscribed_at else None,
+        # 종교 분류
+        "religion": row.religion,
+        "denomination": row.denomination,
+        # 봇
+        "bot_score": row.bot_score,
+        "flagged_as_bot": row.flagged_as_bot,
+    }
 
 # N10: update_profile 화이트리스트 — 사용자가 직접 수정 가능한 필드
 _USER_EDITABLE: frozenset[str] = frozenset({
@@ -54,47 +101,51 @@ def get_or_create(sub_id: str) -> dict:
         row = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
         if not row:
             from ..config import settings as _cfg
+            from datetime import timedelta
+            now = datetime.now(datetime.UTC)
             row = Subscriber(
                 subscriber_id=sub_id,
-                # E-A: 신규 guest 에게 일일 풀 즉시 부여
+                tokens_daily=_cfg.tokens_daily_guest,
+                trial_expires_at=now + timedelta(days=3),  # 3일 무료체험 자동 부여
+            )
+            s.add(row)
+            s.flush()
+        elif row.trial_expires_at is None and row.subscription_tier == "guest":
+            # 기존 guest 사용자 중 trial_expires_at 미설정 → first_seen_at 기준 소급 적용
+            from datetime import timedelta
+            base = row.first_seen_at or datetime.now(datetime.UTC)
+            row.trial_expires_at = base + timedelta(days=3)
+        return _row_to_dict(row)
+
+
+def prepare_profile(sub_id: str, signal: Dict[str, Any] | None = None) -> dict:
+    """increment_question + merge_auto_signal + get_or_create 를 단일 세션으로 처리.
+
+    chat.py 의 3회 개별 세션 호출을 1회로 통합해 DB 왕복을 줄인다.
+    signal 이 없으면 카운트 증가 + 프로필 반환만 수행.
+    """
+    with get_session() as s:
+        row = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
+        if not row:
+            from ..config import settings as _cfg
+            row = Subscriber(
+                subscriber_id=sub_id,
                 tokens_daily=_cfg.tokens_daily_guest,
             )
             s.add(row)
             s.flush()
-        return {
-            "subscriber_id": row.subscriber_id,
-            "journey_stage": row.journey_stage,
-            "faith_stage": row.faith_stage,
-            "emotional_state": row.emotional_state,
-            "current_struggle": row.current_struggle,
-            "preferred_tone": row.preferred_tone,
-            "total_questions": row.total_questions,
-            "onboarding_step": row.onboarding_step,
-            "is_darakbang_member": row.is_darakbang_member,
-            # ❌ AI-REMOVE 2026-05-20 [Cascade]: is_believer 제거 (ORDERS B6 - salvation_status로 대체됨)
-            "session_count": row.session_count,
-            "age_group": row.age_group,
-            "gender": row.gender,
-            "last_emotion": row.last_emotion,
-            "email": row.email,
-            "display_name": row.display_name,
-            "auth_status": row.auth_status,
-            "consent_data": row.consent_data,
-            "consent_kakao": row.consent_kakao,
-            "first_seen_at": str(row.first_seen_at) if row.first_seen_at else None,
-            "last_active_at": str(row.last_active_at) if row.last_active_at else None,
-            "topic_interests": row.topic_interests,
-            # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: D-C12 구원 상태 필드 추가
-            "salvation_status": row.salvation_status,
-            "salvation_confidence": row.salvation_confidence,
-            "salvation_last_signal_at": str(row.salvation_last_signal_at) if row.salvation_last_signal_at else None,
-            "assume_saved": row.assume_saved,
-            # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: D-C13 다락방 3단 필드 추가
-            "darakbang_role": row.darakbang_role,
-            "darakbang_chapter": row.darakbang_chapter,
-            "darakbang_joined_at": str(row.darakbang_joined_at) if row.darakbang_joined_at else None,
-            "darakbang_verified": row.darakbang_verified,
-        }
+
+        row.total_questions = (row.total_questions or 0) + 1
+
+        if signal:
+            if signal.get("emotional_state") and not row.emotional_state:
+                row.emotional_state = signal["emotional_state"]
+            if signal.get("journey_hint") and not row.journey_stage:
+                row.journey_stage = signal["journey_hint"]
+            if signal.get("faith_hint") and not row.faith_stage:
+                row.faith_stage = signal["faith_hint"]
+
+        return _row_to_dict(row)
 
 def get_all_subscribers() -> list[dict]:
     # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: dict 리스트 반환으로 변경 (B5 일관성)
@@ -143,11 +194,20 @@ def increment_session(sub_id: str):
             s.commit()
 
 def increment_question(sub_id: str):
+    """total_questions 원자적 증가 + last_active_at 갱신.
+
+    벌크 UPDATE는 ORM onupdate 훅을 우회하므로 last_active_at 를 명시적으로 함께 갱신한다.
+    """
+    from datetime import datetime
     with get_session() as s:
-        sub = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
-        if sub:
-            sub.total_questions += 1
-            s.commit()
+        s.execute(
+            sa_update(Subscriber)
+            .where(Subscriber.subscriber_id == sub_id)
+            .values(
+                total_questions=Subscriber.total_questions + 1,
+                last_active_at=datetime.now(datetime.UTC),
+            )
+        )
 
 def merge_auto_signal(sub_id: str, signal: Dict[str, Any]):
     """AI가 추출한 사용자 상태 신호 병합 (빈 값만 채움)"""

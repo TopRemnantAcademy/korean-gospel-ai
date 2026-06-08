@@ -20,16 +20,15 @@ if not exist "venv\Scripts\activate.bat" (
 
 REM ---------- Pre-flight ----------
 echo [PRE-CHECK] Verifying the app can load ...
-call "venv\Scripts\activate.bat"
 set "PYTHONPATH=%~dp0"
-python -c "from backend.app.main import app; print('  [OK] backend app loaded')"
+venv\Scripts\python.exe -c "from backend.app.main import app; print('  [OK] backend app loaded')"
 if errorlevel 1 (
     echo.
     echo [ERROR] API cannot start. Run DIAGNOSE.bat to find the cause.
     pause
     exit /b 1
 )
-python -c "import sys, os; sys.path.insert(0, os.getcwd()); from admin.lib.api_client import get_health; print('  [OK] admin imports OK')"
+venv\Scripts\python.exe -c "import sys, os; sys.path.insert(0, os.getcwd()); from admin.lib.api_client import get_health; print('  [OK] admin imports OK')"
 if errorlevel 1 (
     echo.
     echo [ERROR] Admin UI imports broken. Run DIAGNOSE.bat.
@@ -40,14 +39,14 @@ if errorlevel 1 (
 REM ---------- Start API ----------
 echo.
 echo [INFO] Launching API server  (127.0.0.1:8000) ...
-start "Gospel API (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && call venv\Scripts\activate.bat && uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --log-level info"
+start "Gospel API (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --log-level info"
 
 echo [INFO] Waiting up to 30s for API ...
 set /a TRIES=0
 :WAIT_LOOP
 set /a TRIES+=1
 timeout /t 2 /nobreak >nul
-python -c "import httpx,sys; httpx.get('http://127.0.0.1:8000/admin/health', timeout=2); sys.exit(0)" >nul 2>nul
+venv\Scripts\python.exe -c "import httpx,sys; httpx.get('http://127.0.0.1:8000/admin/health', timeout=2); sys.exit(0)" >nul 2>nul
 if not errorlevel 1 goto :API_READY
 if %TRIES% LSS 15 goto :WAIT_LOOP
 
@@ -61,11 +60,11 @@ echo [OK] API is up.
 REM ---------- Start Admin UI ----------
 echo.
 echo [INFO] Launching Admin UI  (127.0.0.1:8501) ...
-start "Gospel Admin (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && call venv\Scripts\activate.bat && streamlit run admin\app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false"
+start "Gospel Admin (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && venv\Scripts\python.exe -m streamlit run admin\app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false"
 
 timeout /t 2 /nobreak >nul
 echo [INFO] Launching User UI  (127.0.0.1:8502) ...
-start "Gospel User (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && call venv\Scripts\activate.bat && streamlit run user\app.py --server.port 8502 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false"
+start "Gospel User (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && venv\Scripts\python.exe -m streamlit run user\app.py --server.port 8502 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false"
 
 timeout /t 5 /nobreak >nul
 start "" "http://127.0.0.1:8501"

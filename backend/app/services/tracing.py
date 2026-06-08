@@ -6,36 +6,14 @@ from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Callable, Optional
 
-from ..config import settings
-
-
-_initialized = False
-_langfuse = None
-
-
-def _init():
-    global _initialized, _langfuse
-    if _initialized:
-        return
-    _initialized = True
-    if not settings.langfuse_enabled:
-        return
-    if not (settings.langfuse_public_key and settings.langfuse_secret_key):
-        return
-    try:
-        from langfuse import Langfuse
-        _langfuse = Langfuse(
-            public_key=settings.langfuse_public_key,
-            secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_host,
-        )
-    except Exception:
-        _langfuse = None
-
 
 def get_client():
-    _init()
-    return _langfuse
+    """Langfuse 클라이언트 반환. connections.py 레지스트리에서 가져옴."""
+    try:
+        from ..connections import connections
+        return connections.langfuse()
+    except Exception:
+        return None
 
 
 # ----- Decorator -----

@@ -1,0 +1,23 @@
+# Railway 배포 설정 — FastAPI 백엔드
+# GitHub 연동 후 push 시 자동 배포
+# 환경변수는 Railway 대시보드 > Variables 탭에서 설정 (아래 "필수 환경변수" 참조)
+#
+# ─── 필수 환경변수 (Railway 대시보드에서 직접 입력) ─────────────────────────
+# LLM_PROVIDER=gemini                     ← 또는 deepseek
+# GOOGLE_API_KEY=...
+# DEEPSEEK_API_KEY=...                    ← 선택
+# QDRANT_URL=https://xxx.qdrant.tech      ← Qdrant Cloud URL
+# QDRANT_API_KEY=...                      ← Qdrant Cloud API Key
+# ADMIN_API_KEY=...                       ← 관리자 토큰 (강한 값으로 변경!)
+# ─────────────────────────────────────────────────────────────────────────────
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --workers 1"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

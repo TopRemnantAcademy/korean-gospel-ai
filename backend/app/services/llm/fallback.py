@@ -1,16 +1,21 @@
-"""LLM provider fallback — rate limit·일시 장애 시 체인의 다음 provider로 재시도.
+"""LLM provider fallback — 실제 오류(연결 불가·잔액 부족·서버 에러) 시에만 다음 provider로 전환.
 # =============================================================================
 # 🔧 AI-AGENT-WORK
 # Agent: Claude (Cowork)
-# Timestamp: 2026-05-26 00:00
-# Task: N1 — stream_with_fallback 첫 chunk probe (fallback 실효성 복원)
-#       N14 — llm_fallback_enabled=False 우회 버그 수정 (skip or (...) → (skip or retryable) and ...)
-# Reason: ORDERS.md N1, N14
-# Status: COMPLETED
+# Timestamp: 2026-05-29
+# Task: F4 — 폴백 정책 재설계
+#   · 비스트리밍: asyncio.wait_for 제거 → 완성될 때까지 무한 대기
+#     (느린 응답은 폴백 사유 아님 — 완전 무응답·HTTP 에러만 폴백)
+#   · 스트리밍: 첫 chunk probe 15초 유지 (무응답 감지용)
+#     이후 스트리밍 중 시간 초과 없음 → 끝까지 기다림
+#   · is_retryable_error: TimeoutError/asyncio.TimeoutError 제거
+#     (스트리밍 첫 chunk 전용 - stream_with_fallback 에서 별도 처리)
+#     ConnectionError·HTTP 오류 코드만 retryable
 # =============================================================================
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import AsyncIterator, Optional
@@ -23,16 +28,24 @@ logger = logging.getLogger(__name__)
 
 _RETRYABLE_RE = re.compile(
     r"rate.?limit|429|503|502|504|resource.?exhausted|quota|overloaded|"
-    r"too many requests|capacity|unavailable|deadline exceeded|high demand",
+    r"too many requests|capacity|unavailable|deadline exceeded|high demand|"
+    r"402|insufficient.?balance|payment.?required|billing|credit|no.?credit",
     re.IGNORECASE,
 )
+
+# 스트리밍: 첫 chunk 가 이 시간 안에 오지 않으면 "완전 무응답" 판정 → fallback
+_FIRST_CHUNK_TIMEOUT = 15.0
 
 _ALL_PROVIDERS = ("gemini", "deepseek", "openai", "claude", "ollama")
 
 
 def is_retryable_error(exc: BaseException) -> bool:
-    """일시적·용량 관련 오류만 다음 provider로 넘긴다."""
-    if isinstance(exc, (TimeoutError, ConnectionError)):
+    """실제 오류(연결 불가, HTTP 에러, 잔액 부족)만 다음 provider로 넘긴다.
+
+    ※ 단순히 느린 응답(TimeoutError)은 retryable 이 아님.
+       폴백은 '완전 무응답 또는 실제 오류' 시에만 발동.
+    """
+    if isinstance(exc, ConnectionError):
         return True
     msg = f"{type(exc).__name__}: {exc}"
     return bool(_RETRYABLE_RE.search(msg))
@@ -94,12 +107,9 @@ async def chat_with_fallback(
             break
         try:
             llm = get_llm(name)
-            resp = await llm.chat(
-                messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                system=system,
-            )
+            # 타임아웃 없음 — 응답이 느려도 완성될 때까지 기다림.
+            # 연결 오류(ConnectionError)·HTTP 에러(402/5xx)만 fallback 트리거.
+            resp = await llm.chat(messages, temperature=temperature, max_tokens=max_tokens, system=system)
             if i > 0:
                 logger.warning(
                     "LLM fallback: %s → %s (%s)",
@@ -111,13 +121,14 @@ async def chat_with_fallback(
         except Exception as e:
             skip = isinstance(e, (ValueError, ImportError))
             retryable = is_retryable_error(e)
-            errors.append(f"{name}: {e}")
+            _label = str(e)
+            errors.append(f"{name}: {_label}")
             if (skip or retryable) and settings.llm_fallback_enabled and i < len(chain) - 1:
-                logger.info("LLM skip/fallback from %s: %s", name, e)
+                logger.warning("LLM fallback %s → %s | 사유: %s", name, chain[i + 1], _label)
                 continue
             raise RuntimeError(
                 f"LLM 호출 실패 (시도: {', '.join(chain[: i + 1])}). "
-                f"마지막 오류: {e}"
+                f"마지막 오류: {_label}"
             ) from e
 
     raise RuntimeError(
@@ -144,7 +155,9 @@ async def stream_with_fallback(
             break
         try:
             llm = get_llm(name)
-            # N1: 첫 chunk까지 받아본 후 반환 — 연결 실패·인증 오류를 fallback 루프 안에서 잡기 위함
+            # 첫 chunk probe: 연결은 됐지만 아무 데이터도 안 오면 "완전 무응답" 판정 → fallback
+            # _FIRST_CHUNK_TIMEOUT(15s) 이내에 첫 토큰이 오지 않으면 asyncio.TimeoutError
+            # 이후 스트리밍은 끝까지 기다림 (시간 초과 없음)
             agen = llm.stream(
                 messages,
                 temperature=temperature,
@@ -153,14 +166,15 @@ async def stream_with_fallback(
             )
             first_chunk: str | None = None
             try:
-                first_chunk = await agen.__anext__()
+                first_chunk = await asyncio.wait_for(agen.__anext__(), timeout=_FIRST_CHUNK_TIMEOUT)
             except StopAsyncIteration:
                 pass
+            # asyncio.TimeoutError (첫 chunk 무응답) → 외부 except로 전달 → 다음 provider
 
             async def _gen(gen=agen, first=first_chunk) -> AsyncIterator[str]:
                 if first is not None:
                     yield first
-                async for piece in gen:
+                async for piece in gen:  # 스트리밍 완료까지 무한 대기
                     yield piece
 
             if i > 0:
@@ -173,10 +187,13 @@ async def stream_with_fallback(
             return llm, _gen(), chain[: i + 1]
         except Exception as e:
             skip = isinstance(e, (ValueError, ImportError))
-            retryable = is_retryable_error(e)
-            errors.append(f"{name}: {e}")
+            # 스트리밍 첫 chunk 무응답도 retryable (is_retryable_error + asyncio.TimeoutError)
+            retryable = is_retryable_error(e) or isinstance(e, asyncio.TimeoutError)
+            _label = f"첫chunk무응답>{_FIRST_CHUNK_TIMEOUT:.0f}s" if isinstance(e, asyncio.TimeoutError) else str(e)
+            errors.append(f"{name}: {_label}")
             if (skip or retryable) and settings.llm_fallback_enabled and i < len(chain) - 1:
+                logger.warning("LLM stream fallback %s → %s | 사유: %s", name, chain[i + 1], _label)
                 continue
-            raise RuntimeError(f"LLM stream 실패: {e}") from e
+            raise RuntimeError(f"LLM stream 실패: {_label}") from e
 
     raise RuntimeError(f"LLM stream 실패 — provider 소진: {chain}")

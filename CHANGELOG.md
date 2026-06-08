@@ -4,6 +4,68 @@
 
 ---
 
+## [2026-05-27] - Agent: Claude — 성능 최적화 + 재방문 영적 메시지 시스템
+
+### ⚡ 성능 최적화
+- `subscriber_service.py`: `_row_to_dict()` 공통 헬퍼 추출 — ORM→dict 변환 단일화.
+  `prepare_profile()` 신규 — `increment_question` + `merge_auto_signal` + `get_or_create` 3회 세션 → 1회 통합.
+  `increment_question()` 원자적 UPDATE + `last_active_at` 명시 갱신 (벌크 UPDATE는 `onupdate` 훅 미작동).
+- `retriever.py`: `_retriever_cache` + `get_retriever()` 추가 — 동일 embedder 이름이면 캐시 반환.
+  HybridRetriever(embedder 로드 + QdrantStore + reranker 초기화) 매 요청 재생성 제거.
+- `prompt_service.py`: `current_text()` 60초 TTL 인메모리 캐시 — 매 요청 DB 조회 제거.
+  `save()` / `reset_to_default()` 호출 시 캐시 즉시 무효화.
+- `chat.py`: `prepare_profile` 사용으로 subscriber 구간 DB 세션 3→1 축소.
+  `HybridRetriever()` 직접 생성 → `get_retriever()` 캐시 조회로 교체 (chat + stream 양쪽).
+
+### 🙏 재방문 영적 메시지 시스템
+- `greeting_service.py` **신규** — 감정 위로 완전 배제, 영적 재해석 질문 방향으로 전환.
+  `rule_based_greeting()`: 감정/여정/구원 상태 기반 영적 재해석 메시지 (LLM 없음, 즉시).
+  `llm_greeting()`: DeepSeek 기반 개인화, 금지 표현 6개 시스템 프롬프트에 명시.
+  `generate_greeting()`: auto/rule/llm 모드 통합 진입점.
+- `chat.py` 엔드포인트 3개 추가:
+  - `GET /chat/ping` — Subscriber 3컬럼만 조회, Interaction 쿼리 없음 (~20ms), `is_returning` + `days_away` + `hint` 반환.
+  - `GET /chat/greeting/simulate` — 관리자용 조건 입력 → 규칙 기반 메시지 즉시 미리보기.
+  - `GET /chat/greeting` — 재방문 영적 재해석 메시지 (rule ~50ms / llm ~1s).
+- `admin/lib/api_client.py`: `chat_ping()`, `simulate_greeting()`, `get_greeting()` 추가.
+- `admin/pages/19_🙏_재방문_관리.py` **신규** — 3탭 어드민 페이지:
+  탭1 사용자 테스트(Ping + 메시지 생성 + Rule vs LLM 비교),
+  탭2 메시지 시뮬레이터(전체 감정×여정 조합 표),
+  탭3 재방문 현황(5개 지표 카드 + 감정분포 + 경과일분포 + 개별 테스트).
+
+---
+
+## [2026-05-27] - Agent: Claude — 보안 강화 + 코드베이스 정리
+
+### 🔧 보안·품질 개선 (PR #2)
+- `subscriber.py`: `UserProfileUpdateReq`(사용자용) / `ProfileUpdateReq`(운영자용) 스키마 분리 — operator-only 필드 노출 차단. `/subscribers/me` 전체 Bearer 토큰 인증 전환, `by_operator=False` 명시, 관리자 인증 실패 로그.
+- `config.py`: `cors_origins` 설정 추가 (기본값: localhost 8501/8502/3000).
+- `main.py`: `RequestIDMiddleware` 추가(X-Request-ID), CORS를 `settings.cors_origins`에서 읽도록 변경, 기본 admin key 시작 경고.
+- `tier_monitor.py`: `measure_sync()` 추가 — Streamlit asyncio 충돌 해결.
+- `scripts/migrate_sqlite_to_postgres.py`: 신규 생성 — SQLite→PostgreSQL 배치 이전, `--dry-run` 지원.
+
+### 🗑️ 불필요 코드 삭제
+- `backend/app/api/admin_agent.py` **삭제** — 보안 위험(by_operator 없는 DB 직접 수정), 기능 전부 subscriber.py에 중복.
+- `admin/pages/10_🤖_AI_관제.py` **삭제** — admin_agent 페어 UI.
+- `backend/app/models/mentoring_schemas.py` **삭제** — 멘토링 서비스 없음, import 없음.
+
+### 🧹 ORM 정리
+- `DuplicateLink` 클래스 삭제 (전체 코드베이스에서 정의만 있고 사용처 0).
+- `MentoringTurn` 클래스 삭제 (멘토링 파이프라인 서비스 전멸 상태).
+- `DupRelation` enum 삭제 (DuplicateLink 전용).
+- 테이블 수 docstring 7 → 13 정정, Category 주석 정리.
+
+### 📋 api_client.py 정리
+- `agent_chat()` 함수 삭제.
+- `get_categories()` 중복 정의(331, 352번 두 번) 버그 수정 → 1개로 통합.
+- `main.py`: admin_agent import·router 등록 제거.
+
+### ✅ ORDERS.md 상태 갱신
+- D-C12 (salvation_status ORM): ✅ DONE
+- D-C13 (darakbang 3단 ORM): ✅ DONE
+- D-C19 (SalvationJourney 테이블): ✅ DONE
+
+---
+
 ## [2026-05-26] - Agent: Claude (Cowork) — N 시리즈 버그픽스 + EPIC M 완성
 
 ### N 시리즈 — 전체 완료 확인 (코드 검증)

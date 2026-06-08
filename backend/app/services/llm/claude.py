@@ -17,7 +17,10 @@ class ClaudeLLM(BaseLLM):
             raise ImportError(
                 "anthropic 패키지가 필요합니다. requirements.txt 에서 주석 해제 후 설치."
             ) from e
-        self._client = AsyncAnthropic(api_key=api_key)
+        # 클라이언트는 connections.py 레지스트리에서 가져옴 (싱글턴)
+        from ...connections import connections
+        client = connections.anthropic()
+        self._client = client if client is not None else AsyncAnthropic(api_key=api_key)
         self._model = model
 
     @property

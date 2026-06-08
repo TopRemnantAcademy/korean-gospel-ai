@@ -1,3 +1,5 @@
+.env
+.env.*
 .git
 .github
 .gitignore
@@ -15,13 +17,15 @@ __pycache__/
 .gospel.db-journal
 .gospel.db-wal
 .qdrant_local/
+qdrant_local/
 backups/
 data/uploads/
 data/backups/
-admin/
 docs/
 scripts/
+_archive/
 *.bat
 *.md
 *.log
 TUNNEL_LOGS.txt
+logs/

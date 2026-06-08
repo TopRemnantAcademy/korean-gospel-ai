@@ -17,9 +17,11 @@ from dotenv import load_dotenv
 
 load_dotenv(_ROOT / ".env")
 
+import time
 from admin.lib.api_client import (
     list_documents, get_document, patch_meta, patch_body,
-    validate_version, publish_version, archive_document, get_audit, bulk_action,
+    validate_version, publish_version, publish_version_async, get_job,
+    archive_document, get_audit, bulk_action,
 )
 from admin.lib.auth import gate
 
@@ -147,13 +149,70 @@ def _render_doc_detail(doc_id: str, key_suffix: str = ""):
             st.divider()
             st.markdown("##### 🟢 검색에 공개하기")
             st.caption("공개하면 🔎 Search 페이지의 답변에 이 자료가 인용될 수 있습니다.")
-            if st.button("🟢 검색에 공개하기", type="primary", key=f"publish_{v['version_id']}"):
-                with st.spinner("벡터 임베딩 + 인덱싱 중... (첫 실행은 5~10분)"):
-                    r = publish_version(doc_id, v["version_id"])
-                if r:
-                    st.success(f"✅ 공개 완료! {r['chunks']}개 청크가 검색에 등록되었습니다.")
+
+            # ── 공개 진행 상태 폴링 ──────────────────────────────────────────
+            _pub_job_key = f"publish_job_{v['version_id']}"
+            _pub_job_id = st.session_state.get(_pub_job_key)
+
+            if _pub_job_id:
+                pub_job = get_job(_pub_job_id)
+                if pub_job.get("__error__") or pub_job.get("__not_found__"):
+                    _etype = pub_job.get("error_type", "unknown")
+                    _emsg  = pub_job.get("message", "연결 실패")
+                    if _etype == "timeout":
+                        st.error("⏱ 서버 응답 없음 — 터미널에서 재시작 후 다시 시도하세요")
+                    elif _etype == "connection":
+                        st.error("🔌 서버 연결 불가 — API 서버가 실행 중인지 확인하세요")
+                    else:
+                        st.error(f"❌ 작업 정보 조회 실패: {_emsg}")
+                    if st.button("다시 조회", key=f"pub_retry_conn_{v['version_id']}"):
+                        st.rerun()
+                    st.session_state[_pub_job_key] = None
+                elif pub_job.get("status") == "failed":
+                    err_msg = (pub_job.get("error_json") or {}).get("error", "알 수 없는 오류")
+                    st.error(f"❌ 공개 실패: {err_msg}")
+                    with st.expander("📋 오류 상세"):
+                        st.code((pub_job.get("error_json") or {}).get("traceback", "없음"), language="python")
+                    if st.button("다시 시도", key=f"pub_retry_{v['version_id']}"):
+                        st.session_state[_pub_job_key] = None
+                        st.rerun()
+                elif pub_job["status"] == "done":
+                    pub_r = pub_job.get("result_json") or {}
+                    st.success(f"✅ 공개 완료! {pub_r.get('chunks', '?')}개 청크가 검색에 등록되었습니다.")
+                    st.session_state[_pub_job_key] = None
                     st.balloons()
                     st.rerun()
+                else:
+                    # running / pending
+                    pct = pub_job.get("progress_pct", 0)
+                    stage = pub_job.get("current_stage") or "처리 중..."
+                    detail = pub_job.get("stage_detail") or ""
+                    st.progress(pct / 100, text=f"⏳ {stage}  {pct}%")
+                    if detail:
+                        st.caption(detail)
+                    _pub_stages = [
+                        ("📝 청킹", 10), ("🧮 임베딩", 80),
+                        ("🗂 인덱싱", 90), ("💾 저장", 95), ("✅ 완료", 100),
+                    ]
+                    _pcols = st.columns(len(_pub_stages))
+                    for i, (sl, sp) in enumerate(_pub_stages):
+                        with _pcols[i]:
+                            if pct >= sp:
+                                st.markdown(f"<div style='text-align:center;color:#22c55e'>✅<br><small>{sl}</small></div>", unsafe_allow_html=True)
+                            elif pct >= sp - 15:
+                                st.markdown(f"<div style='text-align:center;color:#f59e0b'>⏳<br><small>{sl}</small></div>", unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"<div style='text-align:center;color:#94a3b8'>⬜<br><small>{sl}</small></div>", unsafe_allow_html=True)
+                    time.sleep(2)
+                    st.rerun()
+            else:
+                if st.button("🟢 검색에 공개하기", type="primary", key=f"publish_{v['version_id']}"):
+                    resp = publish_version_async(doc_id, v["version_id"])
+                    if resp and resp.get("job_id"):
+                        st.session_state[_pub_job_key] = resp["job_id"]
+                        st.rerun()
+                    else:
+                        st.error("공개 시작에 실패했습니다. API 서버가 실행 중인지 확인하세요.")
         else:
             for k, ok in (cl or {}).items():
                 label = {

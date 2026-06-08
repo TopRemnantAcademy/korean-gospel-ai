@@ -160,7 +160,7 @@ async def transition_status(sub_id: str, signal: SalvationSignal) -> None:
             # 구원 상태 갱신
             sub.salvation_status = new_status
             sub.salvation_confidence = signal.confidence
-            sub.salvation_last_signal_at = datetime.utcnow()
+            sub.salvation_last_signal_at = datetime.now(datetime.UTC)
 
             # 여정 기록
             s.add(SalvationJourney(

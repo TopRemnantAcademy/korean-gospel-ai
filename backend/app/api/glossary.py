@@ -139,7 +139,7 @@ def patch_term(term_id: int, payload: PatchTermIn, authorization: Optional[str] 
             t.canonical_form = payload.canonical_form
         if payload.is_theology_term is not None:
             t.is_theology_term = payload.is_theology_term
-        t.updated_at = datetime.utcnow()
+        t.updated_at = datetime.now(datetime.UTC)
         return _term_to_dict(t)
 
 

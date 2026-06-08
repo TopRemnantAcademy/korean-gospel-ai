@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM 모델 - 7개 테이블.
+"""SQLAlchemy ORM 모델 — 13개 테이블.
 
 설계는 SETUP 문서 §3 데이터 모델과 1:1 매칭.
 """
@@ -31,7 +31,7 @@ def _uuid() -> str:
 
 
 def _now() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(datetime.UTC)
 
 
 # ---------------- Enums ----------------
@@ -51,14 +51,6 @@ class DocVersionState(str, enum.Enum):
     published = "published"
     superseded = "superseded"
     archived = "archived"
-
-
-class DupRelation(str, enum.Enum):
-    identical = "identical"
-    version = "version"
-    summary_of = "summary_of"
-    series_of = "series_of"
-    unrelated = "unrelated"
 
 
 # ---------------- L1: SourceArtifact (immutable) ----------------
@@ -133,6 +125,7 @@ class DocumentVersion(Base):
        # "이 자료는 구원의 핵심 자료" — 운영자가 직접 표시
 
     body_patch: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 마이크로 패치된 본문 (null=원본 그대로)
+    structured_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # INGEST Stage 2 구조화 산출물 (null=미처리)
     chunking_policy: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     checklist: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     validation_report: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
@@ -162,21 +155,6 @@ class IndexSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     version: Mapped[DocumentVersion] = relationship(back_populates="snapshot")
-
-
-# ---------------- DuplicateLink ----------------
-class DuplicateLink(Base):
-    """문서 간 관계 (운영자 결정 결과)."""
-    __tablename__ = "duplicate_link"
-
-    link_id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)
-    doc_id_a: Mapped[str] = mapped_column(ForeignKey("document.doc_id"))
-    doc_id_b: Mapped[str] = mapped_column(ForeignKey("document.doc_id"))
-    similarity_score: Mapped[float] = mapped_column(Float)
-    relation: Mapped[str] = mapped_column(String(30), default=DupRelation.unrelated.value)
-    resolved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
 # ---------------- Subscriber (관제탑 + EPIC D 확장) ----------------
@@ -244,11 +222,27 @@ class Subscriber(Base):
     tokens_lifetime_used: Mapped[int] = mapped_column(Integer, default=0)
        # 누적 사용 토큰 (분석용)
 
-    # 구독 상태
+    # 구독 / 무료체험 상태
     subscription_tier: Mapped[str] = mapped_column(String(20), default="guest")
-       # guest | member | supporter | darakbang
+       # guest | member | supporter
+       # guest : 무료체험 중 또는 체험 종료(trial_expires_at 으로 구분)
+       # member: 유료 회원 → 제한 없음
+       # supporter: 후원 회원 → 제한 없음
     subscribed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     subscription_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+
+    # ✅ 무료체험 만료일 — first_seen_at + 3일로 자동 설정
+    trial_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+       # None → 아직 만료일 미설정 (= 무제한 체험, 운영자 직접 등록 사용자)
+       # 미래값 → 체험 중
+       # 과거값 → 체험 종료, 결제 필요
+
+    # 종교 분류 (사용자 선택 또는 온보딩에서 자동 감지)
+    religion: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+       # 기독교 | 불교 | 무교 | 이슬람 | 기타
+    denomination: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+       # 기독교일 때만 사용: 장로교|감리교|침례교|순복음|성결|기타
+       # 다락방은 denomination 에 속하지 않음 — is_darakbang_member 필드로 별도 관리
 
     # ✅ E-B: 봇 의심 점수
     bot_score: Mapped[float] = mapped_column(Float, default=0.0)
@@ -291,28 +285,6 @@ class AuditLog(Base):
     note: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
 
 
-
-# ---------------- MentoringTurn (관제 파이프라인 로그) ----------------
-class MentoringTurn(Base):
-    __tablename__ = "mentoring_turn"
-
-    turn_id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)
-    session_id: Mapped[str] = mapped_column(String(40), index=True)
-    subscriber_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
-    user_message: Mapped[str] = mapped_column(Text)
-    assistant_message: Mapped[str] = mapped_column(Text)
-    slots_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    crisis_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    eval_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    compressed_context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    llm_engine: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    hijacked: Mapped[bool] = mapped_column(Boolean, default=False)
-    eval_failed: Mapped[bool] = mapped_column(Boolean, default=False)
-    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
-    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
-
-
 # ---------------- PromptTemplate (운영자가 편집 가능) ----------------
 class PromptTemplate(Base):
     """시스템 프롬프트 (active=1 인 행이 현재 사용됨)."""
@@ -329,7 +301,7 @@ class PromptTemplate(Base):
 
 # ---------------- Category (분류 체계) ----------------
 class Category(Base):
-    """신앙 단계, 감정 상태 등의 분류를 유연하게 관리하기 위한 테이블 (Agentic Admin 용)"""
+    """신앙 단계, 감정 상태 등의 분류를 유연하게 관리하기 위한 테이블."""
     __tablename__ = "category"
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)
@@ -361,63 +333,52 @@ class SalvationJourney(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
-# ------------ InviteCode (베타 초대 코드, Tier 0.5+) --------
-class InviteCode(Base):
-    """초대 코드 ORM 모델
-    
-    Tier 0.5+ 에서 사용:
-    - 베타 시범 사용자 관리
-    - 악용 방지
-    - 토큰 보너스 자동 부여
+# ---------------- AppErrorLog (런타임 에러 + 슬로우 리퀘스트 자동 기록) --------
+class AppErrorLog(Base):
+    """ErrorMonitorMiddleware 가 자동으로 기록하는 에러/슬로우리퀘스트 로그.
+
+    level 값:
+      ERROR    — HTTP 500+ 응답
+      SLOW     — 응답 10~30초
+      CRITICAL — 응답 30초 초과 또는 미처리 예외
     """
-    __tablename__ = "invite_codes"
-    
-    code: Mapped[str] = mapped_column(String(32), primary_key=True)
-    # 예: BETA-GOSPEL-ABC123
-    
-    invited_by: Mapped[Optional[str]] = mapped_column(String(40), index=True)
-    # 초대 코드를 생성한 운영자
-    
-    max_uses: Mapped[int] = mapped_column(Integer, default=1)
-    # 최대 사용 횟수
-    
-    used_count: Mapped[int] = mapped_column(Integer, default=0)
-    # 현재 사용된 횟수
-    
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    # 만료 시간
-    
-    grants_tokens: Mapped[int] = mapped_column(Integer, default=20000)
-    # 보너스 토큰
-    
-    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # 설명
-    
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-    # 활성화 여부
-    
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
-    # 생성 시간
-    
-    __table_args__ = (
-        UniqueConstraint('code', name='uq_invite_code'),
-    )
+    __tablename__ = "app_error_log"
+
+    error_id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
+    level: Mapped[str] = mapped_column(String(10), index=True)   # ERROR|SLOW|CRITICAL
+    method: Mapped[str] = mapped_column(String(10))              # GET|POST|...
+    path: Mapped[str] = mapped_column(String(200), index=True)
+    status_code: Mapped[int] = mapped_column(Integer)
+    error_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    traceback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    request_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    client_ip: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
 
-class InviteCodeUsage(Base):
-    """초대 코드 사용 기록"""
-    __tablename__ = "invite_code_usage"
+# ---------------- BackgroundJob (비동기 작업 진행 상태 추적) ------------------
+class BackgroundJob(Base):
+    """업로드·공개 등 오래 걸리는 작업의 진행 상황을 실시간으로 기록.
 
-    usage_id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)
-    code: Mapped[str] = mapped_column(String(32), ForeignKey("invite_codes.code"), index=True)
-    subscriber_id: Mapped[Optional[str]] = mapped_column(String(40), ForeignKey("subscriber.subscriber_id"), nullable=True, index=True)
-    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
-    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    used_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
+    status: pending → running → done | failed
+    progress_pct: 0~100 (프론트엔드 프로그레스바용)
+    current_stage: 짧은 단계명 (예: "📄 텍스트 추출 중...")
+    stage_detail: 세부 설명 (예: "12/120 페이지 처리")
+    """
+    __tablename__ = "background_job"
 
-    __table_args__ = (
-        UniqueConstraint('usage_id', name='uq_usage_id'),
-    )
+    job_id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_uuid)
+    job_type: Mapped[str] = mapped_column(String(30), index=True)  # upload|publish
+    status: Mapped[str] = mapped_column(String(10), default="pending", index=True)  # pending|running|done|failed
+    current_stage: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    stage_detail: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    progress_pct: Mapped[int] = mapped_column(Integer, default=0)
+    result_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
 
 class DocumentDraft(Base):
