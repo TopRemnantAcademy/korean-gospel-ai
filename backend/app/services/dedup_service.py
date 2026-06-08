@@ -57,40 +57,66 @@ def check_on_upload(
     # 2) 같은 제목 -> 새 버전 후보
     nt = _norm_title(proposed_title)
     if nt:
-        candidates = session.query(DocumentVersion).all()
+        # DocumentVersion과 Document를 조인하여 필요한 컬럼만 SELECT
+        candidates = (
+            session.query(
+                DocumentVersion.doc_id,
+                DocumentVersion.title,
+                DocumentVersion.version_number,
+                Document.doc_key
+            )
+            .join(Document, DocumentVersion.doc_id == Document.doc_id)
+            .all()
+        )
         seen_docs = set()
-        for v in candidates:
-            if v.doc_id in seen_docs:
+        for doc_id, title, version_number, doc_key in candidates:
+            if doc_id in seen_docs:
                 continue
-            if _norm_title(v.title) == nt and not any(h.doc_id == v.doc_id for h in hits):
-                seen_docs.add(v.doc_id)
+            if _norm_title(title) == nt and not any(h.doc_id == doc_id for h in hits):
+                seen_docs.add(doc_id)
                 hits.append(DupHit(
                     kind="version",
-                    doc_id=v.doc_id,
-                    doc_key=v.document.doc_key,
-                    title=v.title,
-                    reason=f"같은 제목의 자료가 이미 있습니다 (v{v.version_number}). 새 버전으로 추가하시겠어요?",
+                    doc_id=doc_id,
+                    doc_key=doc_key,
+                    title=title,
+                    reason=f"같은 제목의 자료가 이미 있습니다 (v{version_number}). 새 버전으로 추가하시겠어요?",
                 ))
 
     # 3) 본문 앞부분 유사 (간단 substring) -> 유사 자료
     if extracted_head and len(extracted_head) >= 100:
         head_key = extracted_head[:200]
-        rows = session.query(SourceArtifact).all()
-        for art in rows:
-            if art.content_hash == content_hash:
-                continue
-            ex = art.extracted_text or ""
+        # SourceArtifact에서 전체 extracted_text를 로드하지 않고, 앞부분 1000자만 SELECT
+        from sqlalchemy import func
+        rows = (
+            session.query(
+                SourceArtifact.artifact_id,
+                SourceArtifact.content_hash,
+                func.substr(SourceArtifact.extracted_text, 1, 1000).label("text_head")
+            )
+            .filter(SourceArtifact.content_hash != content_hash)
+            .all()
+        )
+        for artifact_id, art_content_hash, text_head in rows:
+            ex = text_head or ""
             if not ex:
                 continue
-            if head_key[:100] in ex[:1000]:
-                v = session.query(DocumentVersion).filter(
-                    DocumentVersion.artifact_id == art.artifact_id
-                ).first()
+            if head_key[:100] in ex:
+                # N+1 방지를 위해 Document와 join해서 쿼리
+                v = (
+                    session.query(
+                        DocumentVersion.doc_id,
+                        DocumentVersion.title,
+                        Document.doc_key
+                    )
+                    .join(Document, DocumentVersion.doc_id == Document.doc_id)
+                    .filter(DocumentVersion.artifact_id == artifact_id)
+                    .first()
+                )
                 if v and not any(h.doc_id == v.doc_id for h in hits):
                     hits.append(DupHit(
                         kind="similar",
                         doc_id=v.doc_id,
-                        doc_key=v.document.doc_key,
+                        doc_key=v.doc_key,
                         title=v.title,
                         reason="본문의 앞부분이 비슷합니다. 같은 자료의 다른 형식일 수 있어요.",
                     ))

@@ -12,6 +12,7 @@ LLM 독립: chat_with_fallback() 경유 → DeepSeek/Gemini 등 .env로 교체 �
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from ..config import settings
@@ -66,11 +67,10 @@ async def restructure_text(
     window_chars = getattr(settings, "ingest_restructure_window_chars", 3000)
     windows = _make_windows(text, window_chars)
 
-    out_parts: list[str] = []
     warnings: list[str] = []
     used_provider = None
 
-    for i, win in enumerate(windows):
+    async def _process_window(i: int, win: str) -> tuple[int, str, str | None, str | None]:
         user_msg = f"[문서 제목] {title}\n\n[정리할 원고]\n{win}" if title else win
         try:
             # max_tokens: 입력보다 넉넉히 (출력이 입력보다 길 수 있음). 하한 1500.
@@ -82,19 +82,29 @@ async def restructure_text(
                 temperature=0.2,
                 max_tokens=_max_out,
             )
-            used_provider = llm.provider_name
             result = (resp.text or "").strip()
 
             # 안전장치: 출력이 입력의 60% 미만 → 내용 소실 의심, 원문 유지
             if len(result) < len(win) * 0.6:
-                warnings.append(f"window#{i}: 출력 과소({len(result)}/{len(win)}) → 원문 유지")
-                out_parts.append(win)
-            else:
-                out_parts.append(result)
+                return i, win, f"window#{i}: 출력 과소({len(result)}/{len(win)}) → 원문 유지", llm.provider_name
+            return i, result, None, llm.provider_name
         except Exception as e:
             logger.warning("restructure window#%d 실패: %s — 원문 유지", i, e)
-            warnings.append(f"window#{i}: LLM 실패 → 원문 유지")
-            out_parts.append(win)
+            return i, win, f"window#{i}: LLM 실패 → 원문 유지", None
+
+    tasks = [_process_window(i, win) for i, win in enumerate(windows)]
+    results = await asyncio.gather(*tasks)
+
+    # 순서 보장을 위해 정렬
+    results.sort(key=lambda x: x[0])
+
+    out_parts: list[str] = []
+    for _, text_out, warning, provider in results:
+        if warning:
+            warnings.append(warning)
+        if provider:
+            used_provider = provider
+        out_parts.append(text_out)
 
     structured = "\n\n".join(out_parts)
     return structured, {

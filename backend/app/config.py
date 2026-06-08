@@ -101,8 +101,8 @@ class Settings(BaseSettings):
     # ---- INGEST 파이프라인 (문서 재편집 + 청킹) ----
     # 각 단계 .env 한 줄로 ON/OFF. LLM 단계는 DeepSeek 등 chat_with_fallback 경유.
     ingest_normalize_enabled: bool = True        # Stage 1: 구어체 정리 (규칙, 빠름)
-    ingest_restructure_enabled: bool = False     # Stage 2: 섹션헤딩+문어체 (LLM, 느림·비용)
-    ingest_contextual_enabled: bool = False      # Stage 4: 청크 맥락 강화 (LLM, 검색정확도↑)
+    ingest_restructure_enabled: bool = True      # Stage 2: 섹션헤딩+문어체 (LLM, 구어체→문어체)
+    ingest_contextual_enabled: bool = True       # Stage 4: 청크 맥락 강화 (LLM, 검색정확도↑)
     ingest_quality_gate_enabled: bool = True     # Stage 7: 품질 검증·차단 (규칙)
     ingest_chunk_target_tokens: int = 350        # 청크 목표 토큰
     ingest_chunk_max_tokens: int = 512           # 청크 최대 토큰 (임베더 한도)
@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     ingest_restructure_window_chars: int = 3000  # 구조화 LLM 윈도우 크기
 
     # ---- 기타 ----
+    max_upload_size_mb: int = 100               # P4: 대용량 파일 업로드 제한
     data_dir: str = "data/documents"
     log_level: str = "INFO"
 

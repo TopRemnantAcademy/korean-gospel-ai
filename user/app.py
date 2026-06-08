@@ -308,6 +308,7 @@ for _k, _v in {
     "auth_token":        None,
     "user_display_name": None,
     "theme":             "light",
+    "streaming_mode":    False,  # G-6: 스트리밍 모드 토글
 }.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
@@ -434,12 +435,19 @@ _uname     = st.session_state.get("user_display_name") or ""
 _is_dark   = (_TK == "dark")
 
 st.markdown('<div class="topbar">', unsafe_allow_html=True)
-_, c_theme, c_login = st.columns([6, 0.6, 1.8])
+_, c_theme, c_stream, c_login = st.columns([5.4, 0.6, 0.6, 1.8])
 
 with c_theme:
     if st.button("☀️" if _is_dark else "🌙", key="btn_theme",
                  help="라이트" if _is_dark else "다크"):
         st.session_state.theme = "light" if _is_dark else "dark"
+        st.rerun()
+
+with c_stream:
+    _sm = st.session_state.streaming_mode
+    if st.button("🟢" if _sm else "⚪", key="btn_stream",
+                 help="스트리밍 켜기" if not _sm else "스트리밍 끄기"):
+        st.session_state.streaming_mode = not _sm
         st.rerun()
 
 with c_login:
@@ -565,29 +573,61 @@ if prompt:
         interaction_id = None
         ph = st.empty()
 
-        with st.spinner(""):
+        _streaming = st.session_state.get("streaming_mode", False)
+
+        if _streaming:
+            # G-6: 스트리밍 모드 ─────────────────────────────────────────────
             try:
-                with httpx.Client(timeout=180) as c:
-                    r = c.post(f"{API_BASE}/chat", json={
+                with httpx.stream(
+                    "POST", f"{API_BASE}/chat/stream",
+                    json={
                         "query": prompt,
                         "history": [
                             {"role": m["role"], "content": m["content"]}
                             for m in st.session_state.msgs[:-1]
                         ],
                         "user_id": st.session_state.subscriber_id,
-                    })
-                if r.status_code < 400:
-                    data = r.json()
-                    full_text      = data.get("answer", "")
-                    sources        = data.get("sources", [])
-                    interaction_id = data.get("interaction_id")
+                    },
+                    timeout=180,
+                ) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_text():
+                        if chunk.strip():
+                            full_text += chunk
+                            ph.markdown(full_text + "▌")
                     ph.markdown(full_text)
-                elif r.status_code == 429:
-                    st.warning("오늘 무료 응답이 모두 사용되었어요. 오른쪽 상단 👤 에서 가입하시면 월 10만 토큰을 드려요. 🎁")
-                else:
-                    st.error("죄송합니다. 잠시 후 다시 시도해 주세요.")
-            except Exception:
-                st.error("연결에 문제가 있어요. 잠시 후 다시 시도해 주세요.")
+            except Exception as e:
+                st.error(f"스트리밍 중 오류: {e}")
+                full_text = "죄송합니다. 스트리밍 응답을 가져오지 못했어요."
+                ph.markdown(full_text)
+        else:
+            # 기존 비스트리밍 모드 ─────────────────────────────────────────
+            with st.spinner(""):
+                try:
+                    with httpx.Client(timeout=180) as c:
+                        r = c.post(f"{API_BASE}/chat", json={
+                            "query": prompt,
+                            "history": [
+                                {"role": m["role"], "content": m["content"]}
+                                for m in st.session_state.msgs[:-1]
+                            ],
+                            "user_id": st.session_state.subscriber_id,
+                        })
+                    if r.status_code < 400:
+                        data = r.json()
+                        full_text      = data.get("answer", "")
+                        sources        = data.get("sources", [])
+                        interaction_id = data.get("interaction_id")
+                        ph.markdown(full_text)
+                    elif r.status_code == 429:
+                        st.warning("오늘 무료 응답이 모두 사용되었어요. 오른쪽 상단 👤 에서 가입하시면 월 10만 토큰을 드려요. 🎁")
+                        full_text = ""
+                    else:
+                        st.error("죄송합니다. 잠시 후 다시 시도해 주세요.")
+                        full_text = ""
+                except Exception:
+                    st.error("연결에 문제가 있어요. 잠시 후 다시 시도해 주세요.")
+                    full_text = ""
 
     if full_text:
         st.session_state.msgs.append({

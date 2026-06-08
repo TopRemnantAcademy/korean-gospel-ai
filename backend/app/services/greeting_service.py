@@ -26,7 +26,7 @@ def days_since_last_active(dt_str: Optional[str]) -> Optional[int]:
         return None
     try:
         dt = datetime.fromisoformat(dt_str.split(".")[0])
-        return max(0, (datetime.utcnow() - dt).days)
+        return max(0, (datetime.now(datetime.UTC) - dt).days)
     except Exception:
         return None
 

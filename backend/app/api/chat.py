@@ -182,7 +182,7 @@ async def chat(req: ChatRequest):
 
     # ⚡ 2) 기존 DB 프로필 로드 (LLM 없음 — 빠른 DB 읽기만)
     from ..services.subscriber_service import get_or_create, prepare_profile
-    profile = prepare_profile(sub_id, None)  # total_questions 증가 + 기존 프로필 반환 (LLM 신호 없음)
+    profile = await asyncio.to_thread(prepare_profile, sub_id, None)  # total_questions 증가 + 기존 프로필 반환 (LLM 신호 없음)
 
     # ⚡ 3) 검색 + (선택적) 입력 분류 병렬 실행
     effective_embedder = _route_embedder(req.embedder, req.target_lang)
@@ -259,7 +259,7 @@ async def chat(req: ChatRequest):
             from ..services.llm.router import classify_user_signal as _cls_sig
             _sig = await _cls_sig(_q_snap) or {}
             if _sig:
-                prepare_profile(sub_id, _sig)
+                await asyncio.to_thread(prepare_profile, sub_id, _sig)
         except Exception:
             pass
         if _settings.salvation_detection_enabled:
@@ -498,22 +498,81 @@ def _build_cited(items) -> list[dict]:
 
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
-    """간단 streaming - 답변 텍스트만 SSE로 전송 (출처/메타는 별도 GET 가능)."""
-    t0_stream = time.time()  # N7: elapsed 실측
+    """스트리밍 응답 - G-1~G-5 파이프라인 적용."""
+    t0_stream = time.time()
     sub_id = req.user_id or DEFAULT_USER
     lf = get_client()
     trace = lf.trace(name="chat_stream", input=req.model_dump(), user_id=sub_id) if lf else None
 
-    # 입력 정책
+    # 1) 입력 정책
     in_pol = check_input(req.query)
-    if trace:  # N7: input_policy trace.event
+    if trace:
         trace.event(name="input_policy", input=req.query, output=in_pol.__dict__)
     if not in_pol.allowed:
         raise HTTPException(status_code=400, detail=in_pol.reason)
 
-    # ✏️ AI-CHANGE 2026-05-26 [Claude]: D-C14 — stream 엔드포인트에도 구원 신호 감지 적용
+    # ⚡ 1.5) G-1: 입력 분류 (병렬 실행 준비)
     from ..services.subscriber_service import get_or_create as _get_sub
     _stream_profile = _get_sub(sub_id)
+
+    # 검색용 리트리버 미리 생성
+    effective_embedder = _route_embedder(req.embedder, req.target_lang)
+    retriever = get_retriever(effective_embedder)
+
+    # G-1: 분류 + 검색 병렬 실행 (또는 기본값 사용)
+    if _settings.classify_input_enabled:
+        classification, items = await asyncio.gather(
+            classify_input(req.query, target_lang=req.target_lang),
+            retriever.retrieve(req.query, profile=_stream_profile),
+        )
+    else:
+        from ..models.schemas import InputClassification as _IC, Clarity as _Clarity, Tone as _Tone, SpiritualError as _SE, RiskLevel as _RL
+        classification = _IC(
+            clarity=_Clarity.clear, tone=_Tone.calm,
+            spiritual_error=_SE.none, risk_level=_RL.low,
+            rationale="classify_input_enabled=false",
+        )
+        items = await retriever.retrieve(req.query, profile=_stream_profile)
+
+    if trace:
+        trace.event(name="input_classification", input=req.query, output=classification.model_dump())
+        try:
+            trace.update(tags=[
+                f"clarity:{classification.clarity.value}",
+                f"tone:{classification.tone.value}",
+                f"spiritual_error:{classification.spiritual_error.value}",
+                f"risk_level:{classification.risk_level.value}",
+                f"lang:{req.target_lang}",
+            ])
+        except Exception:
+            pass
+        trace.event(
+            name="retrieval", input=req.query,
+            output={"count": len(items), "ids": [it.id for it in items], "target_lang": req.target_lang},
+        )
+
+    # 1.6) G-2: 모호한 질문 → 재질문만 반환 (스트리밍 없이 즉시 반환)
+    if classification.clarity == Clarity.ambiguous:
+        clarifying_q = await generate_clarifying_question(req.query, classification, req.target_lang)
+        if trace:
+            trace.event(name="clarification_requested", input=req.query, output=clarifying_q)
+        elapsed = int((time.time() - t0_stream) * 1000)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            content={
+                "answer": clarifying_q,
+                "sources": [],
+                "policy": {"input_allowed": True, "output_notes": "clarification_requested"},
+                "llm_provider": "clarifier",
+                "llm_model": "clarifier",
+                "embedder": "none",
+                "elapsed_ms": elapsed,
+                "trace_id": trace.id if trace else None,
+                "target_lang": req.target_lang,
+            }
+        )
+
+    # D-C14: 구원 신호 감지 (백그라운드)
     try:
         _sal_signal = await detect_salvation_signal(
             req.query, _stream_profile.get("salvation_status", "unknown")
@@ -531,17 +590,7 @@ async def chat_stream(req: ChatRequest):
         if trace:
             trace.event(name="salvation_detect_failed", output={"error": str(_e)})
 
-    # 검색
-    # ✏️ AI-CHANGE 2026-05-25 [Claude]: Cross-lingual RAG — /chat/stream 에도 임베더+프롬프트 라우팅 동일 적용
-    effective_embedder = _route_embedder(req.embedder, req.target_lang)
-    retriever = get_retriever(effective_embedder)  # 모듈-레벨 캐시 — 매 요청 재생성 방지
-    items = await retriever.retrieve(req.query, profile=_stream_profile)  # D-C16: profile 전달
-    if trace:  # N7: retrieval trace.event
-        trace.event(
-            name="retrieval", input=req.query,
-            output={"count": len(items), "ids": [it.id for it in items], "target_lang": req.target_lang},
-        )
-
+    # 3) 프롬프트 구성
     user_prompt = build_user_prompt(req.query, [it.text for it in items], target_lang=req.target_lang)
 
     prior = build_context_for_llm(sub_id, max_pairs=3)
@@ -549,30 +598,41 @@ async def chat_stream(req: ChatRequest):
     messages.extend([Message(role=m.role, content=m.content) for m in req.history])
     messages.append(Message(role="user", content=user_prompt))
 
-    # ✏️ AI-CHANGE 2026-05-25 [Claude]: 한국어면 DB 프롬프트, 비한국어면 코드 내장 언어별 프롬프트
+    # 시스템 프롬프트
     if req.target_lang == "ko":
         system_prompt = prompt_service.current_text()
     else:
         system_prompt = get_system_prompt(req.target_lang)
 
-    # ✏️ AI-CHANGE 2026-05-26 [Claude]: D-C18 — stream에도 salvation_prompt_wrapper 적용
+    # D-C18: salvation_prompt_wrapper
     system_prompt = build_final_system_prompt(system_prompt, _stream_profile)
-    if req.target_lang != "ko":
-        system_prompt += (
-            "\n\n[USER PROFILE above is in Korean — adapt your answer's tone and content accordingly.]"
-            if req.target_lang == "en" else
-            "\n\n[以上用户档案为韩文 — 请据此调整回答的语气与内容。]"
-        )
 
+    # 3.5) G-5: 응답 구조 가이드 append
+    structure_block = build_response_structure_block(classification, req.target_lang)
+    system_prompt += "\n\n" + structure_block
+
+    # 3.6) G-3: 영적 교정 블록 prepend
+    correction_block = build_correction_block(classification.spiritual_error, req.target_lang)
+    if correction_block:
+        system_prompt = correction_block + "\n\n" + system_prompt
+        if trace:
+            trace.event(name="spiritual_correction", output={"error": classification.spiritual_error.value})
+
+    if req.target_lang != "ko":
+        if req.target_lang == "en":
+            system_prompt += "\n\n[USER PROFILE above is in Korean — Adapt your English answer's tone and content to this user's situation.]"
+        else:
+            system_prompt += "\n\n[以上用户档案为韩文 — 请据此调整中文回答的语气与内容。]"
+
+    # 4) LLM 스트리밍
     llm, stream_iter, _llm_attempts = await stream_with_fallback(
         messages,
         primary_provider=req.llm_provider,
         system=system_prompt,
         temperature=0.3,
-        max_tokens=1500,
+        max_tokens=700,
     )
 
-    # N7: stream generation span — 스트리밍 시작 전 open
     gen_span = trace.generation(
         name="stream_answer", model=req.llm_provider or "auto", input=user_prompt,
     ) if trace else None
@@ -586,11 +646,10 @@ async def chat_stream(req: ChatRequest):
             yield piece
         full_text = "".join(full)
 
-        # N7: generation span 종료
         if gen_span:
             gen_span.end(output=full_text)
 
-        # ✏️ AI-CHANGE 2026-05-26 [Claude]: G-4.6 — 스트리밍 완료 후 Layer A + C (fail-open)
+        # G-4.5/G-4.6: 아첨 필터 + 재생성
         stream_filter = check_flattery(full_text, target_lang=req.target_lang)
         final_text = full_text
         if stream_filter.violated:
@@ -609,28 +668,26 @@ async def chat_stream(req: ChatRequest):
             if trace:
                 trace.event(name=f"stream_regen_{_status}", output={"violations": _violations})
 
-        # N8: appended_text 필드 사용 — prefix-slice 위험 제거
+        # 5) 안전망
         verdict = apply_safety(req.query, final_text)
         if verdict.appended_text:
             yield verdict.appended_text
         if trace and verdict.triggered:
             trace.event(name="safety_triggered", output={"codes": verdict.triggered, "blocked": verdict.blocked})
 
-        # N7: elapsed 실측
+        # 로그 저장
         elapsed_ms = int((time.time() - t0_stream) * 1000)
-
-        # 로그
         try:
             with get_session() as s:
                 s.add(Interaction(
                     subscriber_id=sub_id,
                     question=req.query,
-                    answer=verdict.answer,
+                    answer=verdict.answer if verdict.triggered else final_text,
                     trace_id=trace.id if trace else None,
-                    cited_versions=_build_cited(items),  # N9: 공통 헬퍼 사용 (version_id 포함)
+                    cited_versions=_build_cited(items),
                     elapsed_ms=elapsed_ms,
                 ))
-        except Exception as e:  # N6: 실패 silent → trace.event 기록
+        except Exception as e:
             if trace:
                 trace.event(name="interaction_save_failed", output={"error": str(e)})
 

@@ -173,7 +173,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # ── 4) 무료체험 만료 확인 (guest만) ──────────────────────────────────
         if not is_paid and sub_id != "anon" and trial_exp is not None:
-            if datetime.utcnow() > trial_exp:
+            if datetime.now(datetime.UTC) > trial_exp:
                 return JSONResponse(
                     status_code=402,
                     content={

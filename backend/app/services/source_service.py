@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 import hashlib
-import json
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +15,6 @@ from ..config import settings
 from ..models.orm import SourceArtifact
 from . import extraction_service
 from . import audit_service
-from .chunker import chunk_text
 
 
 UPLOADS_DIR = settings.root_dir / "data" / "uploads"
@@ -52,22 +50,6 @@ def ingest_file(
 
     mime = _guess_mime(filename)
     warnings = dict(res.warnings or {})
-
-    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if suffix in {"txt", "md"} and res.text:
-        ok, jsonl_rel, err = _write_jsonl(
-            storage_path=storage_path,
-            extracted_text=res.text,
-            base_metadata={
-                "original_filename": filename,
-                "content_hash": content_hash,
-                "mime_type": mime,
-            },
-        )
-        if ok and jsonl_rel:
-            warnings["jsonl_path"] = jsonl_rel
-        elif err:
-            warnings["jsonl_error"] = err
     artifact = SourceArtifact(
         original_filename=filename,
         content_hash=content_hash,
@@ -107,31 +89,3 @@ def _guess_mime(filename: str) -> str:
         "txt": "text/plain",
         "md": "text/markdown",
     }.get(s, "application/octet-stream")
-
-
-def _write_jsonl(
-    *,
-    storage_path: Path,
-    extracted_text: str,
-    base_metadata: dict,
-) -> tuple[bool, Optional[str], Optional[str]]:
-    try:
-        chunks = chunk_text(extracted_text)
-        if not chunks:
-            return False, None, "no_chunks"
-
-        jsonl_path = storage_path.with_suffix(".jsonl")
-        with jsonl_path.open("w", encoding="utf-8") as f:
-            for ch in chunks:
-                meta = dict(base_metadata)
-                meta.update({
-                    "chunk_id": ch.chunk_id,
-                    "char_start": ch.char_start,
-                    "char_end": ch.char_end,
-                })
-                f.write(json.dumps({"text": ch.text, "metadata": meta}, ensure_ascii=False) + "\n")
-
-        rel = str(jsonl_path.relative_to(settings.root_dir))
-        return True, rel, None
-    except Exception as e:
-        return False, None, str(e)[:200]

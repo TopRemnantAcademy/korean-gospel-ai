@@ -216,7 +216,7 @@ def spiritual_journey(days: int = 30, authorization: Optional[str] = Header(defa
     from ..models.orm import SalvationJourney
     from datetime import datetime, timedelta
 
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(datetime.UTC) - timedelta(days=days)
     with get_session() as s:
         rows = s.query(SalvationJourney).filter(
             SalvationJourney.created_at >= since
@@ -242,7 +242,7 @@ def spiritual_stagnant(
     from ..models.orm import Subscriber
     from datetime import datetime, timedelta
 
-    cutoff = datetime.utcnow() - timedelta(days=stagnant_days)
+    cutoff = datetime.now(datetime.UTC) - timedelta(days=stagnant_days)
     with get_session() as s:
         subs = s.query(Subscriber).filter(
             Subscriber.salvation_last_signal_at.isnot(None)

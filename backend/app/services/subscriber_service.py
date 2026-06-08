@@ -102,7 +102,7 @@ def get_or_create(sub_id: str) -> dict:
         if not row:
             from ..config import settings as _cfg
             from datetime import timedelta
-            now = datetime.utcnow()
+            now = datetime.now(datetime.UTC)
             row = Subscriber(
                 subscriber_id=sub_id,
                 tokens_daily=_cfg.tokens_daily_guest,
@@ -113,7 +113,7 @@ def get_or_create(sub_id: str) -> dict:
         elif row.trial_expires_at is None and row.subscription_tier == "guest":
             # 기존 guest 사용자 중 trial_expires_at 미설정 → first_seen_at 기준 소급 적용
             from datetime import timedelta
-            base = row.first_seen_at or datetime.utcnow()
+            base = row.first_seen_at or datetime.now(datetime.UTC)
             row.trial_expires_at = base + timedelta(days=3)
         return _row_to_dict(row)
 
@@ -205,7 +205,7 @@ def increment_question(sub_id: str):
             .where(Subscriber.subscriber_id == sub_id)
             .values(
                 total_questions=Subscriber.total_questions + 1,
-                last_active_at=datetime.utcnow(),
+                last_active_at=datetime.now(datetime.UTC),
             )
         )
 

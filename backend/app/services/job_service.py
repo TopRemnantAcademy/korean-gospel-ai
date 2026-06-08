@@ -43,7 +43,7 @@ def update_stage(
         job.current_stage = stage
         job.stage_detail = detail
         job.progress_pct = min(max(pct, 0), 100)
-        job.updated_at = datetime.utcnow()
+        job.updated_at = datetime.now(datetime.UTC)
         s.commit()
 
 
@@ -58,7 +58,7 @@ def complete_job(job_id: str, result: dict) -> None:
         job.stage_detail = ""
         job.progress_pct = 100
         job.result_json = result
-        job.updated_at = datetime.utcnow()
+        job.updated_at = datetime.now(datetime.UTC)
         s.commit()
 
 
@@ -71,7 +71,7 @@ def fail_job(job_id: str, error: dict) -> None:
         job.status = "failed"
         job.current_stage = "❌ 실패"
         job.error_json = error
-        job.updated_at = datetime.utcnow()
+        job.updated_at = datetime.now(datetime.UTC)
         s.commit()
 
 
@@ -83,7 +83,7 @@ def cleanup_stale_jobs(older_than_minutes: int = 30) -> int:
     """
     from datetime import timedelta
     from sqlalchemy import select
-    cutoff = datetime.utcnow() - timedelta(minutes=older_than_minutes)
+    cutoff = datetime.now(datetime.UTC) - timedelta(minutes=older_than_minutes)
     with get_session() as s:
         stmt = select(BackgroundJob).where(
             BackgroundJob.status.in_(["pending", "running"]),
@@ -96,7 +96,7 @@ def cleanup_stale_jobs(older_than_minutes: int = 30) -> int:
             job.error_json = {
                 "error": "서버가 재시작되어 작업이 취소되었어요. 다시 시도해주세요.",
             }
-            job.updated_at = datetime.utcnow()
+            job.updated_at = datetime.now(datetime.UTC)
         count = len(stale)
         s.commit()
     return count

@@ -50,7 +50,7 @@ def save_draft(version_id: str, payload: DraftIn, authorization: Optional[str] =
                     DocumentDraft.operator_id == payload.operator_id)
             .first()
         )
-        now = datetime.utcnow()
+        now = datetime.now(datetime.UTC)
         if existing:
             if payload.draft_body is not None:
                 existing.draft_body = payload.draft_body

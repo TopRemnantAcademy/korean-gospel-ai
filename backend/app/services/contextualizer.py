@@ -15,6 +15,7 @@ LLM 독립: chat_with_fallback() 경유.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from ..config import settings
@@ -75,11 +76,17 @@ async def contextualize_chunks(
         section_groups.setdefault(c.section_title, []).append(c)
 
     section_context: dict[str, str] = {}
-    for sec_title, group in section_groups.items():
+    sec_titles = list(section_groups.keys())
+    
+    tasks = []
+    for sec_title in sec_titles:
+        group = section_groups[sec_title]
         rep = max(group, key=lambda c: len(c.text))
-        section_context[sec_title] = await _gen_context(
-            title, sec_title, rep.text, llm_provider
-        )
+        tasks.append(_gen_context(title, sec_title, rep.text, llm_provider))
+
+    contexts = await asyncio.gather(*tasks)
+    for sec_title, ctx in zip(sec_titles, contexts):
+        section_context[sec_title] = ctx
 
     results: list[dict] = []
     for c in chunks:

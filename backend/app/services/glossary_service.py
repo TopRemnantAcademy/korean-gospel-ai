@@ -195,7 +195,7 @@ def extract_terms_from_text(
     freq  = Counter(words)
 
     updated: list[GlossaryTerm] = []
-    now = datetime.utcnow()
+    now = datetime.now(datetime.UTC)
 
     for word, cnt in freq.items():
         # ── 필터 1: 명사형인지 판별 ────────────────────────────
@@ -263,7 +263,7 @@ def approve_term(
         t.definition = definition
     if category is not None:
         t.category = category
-    t.updated_at = datetime.utcnow()
+    t.updated_at = datetime.now(datetime.UTC)
     session.flush()
     return t
 
@@ -289,7 +289,7 @@ def merge_aliases(session: Session, canonical_id: int, alias_ids: list[int]) -> 
         canonical.frequency_count += alias.frequency_count
         session.delete(alias)
     canonical.aliases    = existing_aliases
-    canonical.updated_at = datetime.utcnow()
+    canonical.updated_at = datetime.now(datetime.UTC)
     session.flush()
     return canonical
 

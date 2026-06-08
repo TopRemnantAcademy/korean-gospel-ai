@@ -12,6 +12,11 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 def _check_admin(authorization):
+    if settings.admin_api_key == "change-me":
+        raise HTTPException(
+            status_code=503,
+            detail="관리자 API 비활성화됨 — .env 파일에 ADMIN_API_KEY 를 설정하고 서버를 재시작하세요.",
+        )
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=403, detail="missing admin token")
     token = authorization.split(" ", 1)[1].strip()
@@ -21,12 +26,10 @@ def _check_admin(authorization):
 
 @router.get("/health")
 def health():
-    """기본 헬스체크 — 인증 불필요."""
+    """기본 헬스체크 — 인증 불필요. 민감 정보 제외."""
     return {
         "ok": True,
-        "provider": settings.llm_provider,
-        "embedder": settings.embedder,
-        "qdrant_url": settings.qdrant_url,
+        "version": "0.3.1",
     }
 
 
@@ -121,7 +124,7 @@ GEMINI_FREE_RPM_LIMIT = 15       # 분당
 @router.get("/usage")
 def usage(authorization=Header(default=None)):
     _check_admin(authorization)
-    now = datetime.utcnow()
+    now = datetime.now(datetime.UTC)
     today_start = datetime(now.year, now.month, now.day)
     last_24h = now - timedelta(hours=24)
     last_1m = now - timedelta(minutes=1)
@@ -188,7 +191,7 @@ def list_errors(
     _check_admin(authorization)
     limit = max(1, min(limit, 500))
     hours = max(1, min(hours, 720))  # 최대 30일
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(datetime.UTC) - timedelta(hours=hours)
 
     with get_session() as s:
         q = (
@@ -252,10 +255,10 @@ def upgrade_subscription(
         row.subscription_tier = payload.tier
 
         if payload.tier in ("member", "supporter"):
-            row.subscribed_at = datetime.utcnow()
+            row.subscribed_at = datetime.now(datetime.UTC)
             row.trial_expires_at = None   # 유료 전환 시 만료 제거
         elif payload.extend_trial_days > 0:
-            base = max(row.trial_expires_at or datetime.utcnow(), datetime.utcnow())
+            base = max(row.trial_expires_at or datetime.now(datetime.UTC), datetime.now(datetime.UTC))
             row.trial_expires_at = base + timedelta(days=payload.extend_trial_days)
 
         # 캐시 무효화
@@ -280,7 +283,7 @@ def subscription_stats(authorization=Header(default=None)):
     """구독 티어별 사용자 수 + 체험 만료 임박자 수."""
     _check_admin(authorization)
     from ..models.orm import Subscriber
-    now = datetime.utcnow()
+    now = datetime.now(datetime.UTC)
     tomorrow = now + timedelta(days=1)
     with get_session() as s:
         total = s.query(Subscriber).count()
@@ -313,7 +316,7 @@ def subscription_stats(authorization=Header(default=None)):
 def error_stats(authorization=Header(default=None)):
     """에러 요약 통계 — 사이드바 뱃지 및 대시보드 지표용."""
     _check_admin(authorization)
-    now = datetime.utcnow()
+    now = datetime.now(datetime.UTC)
     h1   = now - timedelta(hours=1)
     h24  = now - timedelta(hours=24)
     d7   = now - timedelta(days=7)

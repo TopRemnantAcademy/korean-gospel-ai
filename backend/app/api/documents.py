@@ -25,6 +25,7 @@ from ..services import (
     audit_service, document_service, publish_service, source_service, dedup_service,
 )
 from ..services import job_service
+from ..services.embedding.factory import get_embedder
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -270,9 +271,23 @@ async def upload_document(
 ):
     """완성본 업로드 -> L1 artifact + L2 draft 생성."""
     _check_admin(authorization)
+    
+    # P4: 대용량 파일 크기 검증
+    max_size = settings.max_upload_size_mb * 1024 * 1024
+    if file.size and file.size > max_size:
+        raise HTTPException(
+            413, 
+            f"파일 크기가 너무 큽니다. 최대 {settings.max_upload_size_mb}MB까지 업로드 가능합니다."
+        )
+    
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "empty file")
+    if len(raw) > max_size:
+        raise HTTPException(
+            413,
+            f"파일 크기가 너무 큽니다. 최대 {settings.max_upload_size_mb}MB까지 업로드 가능합니다."
+        )
 
     tags = [t.strip() for t in (topic_tags or "").split(",") if t.strip()]
     refs = [r.strip() for r in (scripture_refs or "").split(",") if r.strip()]
@@ -332,9 +347,23 @@ async def upload_document_async(
 ):
     """비동기 업로드 — job_id 즉시 반환, GET /jobs/{job_id} 로 폴링."""
     _check_admin(authorization)
+    
+    # P4: 대용량 파일 크기 검증
+    max_size = settings.max_upload_size_mb * 1024 * 1024
+    if file.size and file.size > max_size:
+        raise HTTPException(
+            413,
+            f"파일 크기가 너무 큽니다. 최대 {settings.max_upload_size_mb}MB까지 업로드 가능합니다."
+        )
+    
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "empty file")
+    if len(raw) > max_size:
+        raise HTTPException(
+            413,
+            f"파일 크기가 너무 큽니다. 최대 {settings.max_upload_size_mb}MB까지 업로드 가능합니다."
+        )
 
     tags = [t.strip() for t in (topic_tags or "").split(",") if t.strip()]
     refs = [r.strip() for r in (scripture_refs or "").split(",") if r.strip()]
@@ -534,6 +563,75 @@ def validate_version(
         return {"passed": ok, "report": report, "state": v.state}
 
 
+# ---------- 6b) Preview (발행 전 미리보기) ----------
+@router.get("/{doc_id}/versions/{version_id}/preview")
+def preview_version(
+    doc_id: str, version_id: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    """발행 전 전체 텍스트·품질·중복·청크 미리보기."""
+    _check_admin(authorization)
+    with get_session() as s:
+        v = document_service.get_version(s, version_id)
+        if not v or v.doc_id != doc_id:
+            raise HTTPException(404, "version not found")
+        
+        art = v.artifact
+        if not art:
+            raise HTTPException(404, "artifact not found")
+        
+        # 1) 전체 추출 텍스트
+        full_text = art.extracted_text or ""
+        
+        # 2) 품질 검사 결과
+        warnings = dict(art.extraction_warnings or {})
+        
+        # 3) 중복 감지
+        dedup_hits = []
+        try:
+            hits = dedup_service.check_on_upload(
+                s,
+                content_hash=art.content_hash,
+                proposed_title=v.title,
+                extracted_head=full_text[:500],
+            )
+            dedup_hits = [
+                dedup_service.to_dict(h) for h in hits if h.doc_id != v.doc_id
+            ]
+        except Exception:
+            pass
+        
+        # 4) 청크 미리보기 (quality_gate 통과 시뮬레이션)
+        chunk_preview = []
+        try:
+            from ..services.chunker import chunk_text
+            from ..services.quality_gate import check_chunk
+            
+            chunks = chunk_text(full_text)
+            for c in chunks[:10]:  # 처음 10개만
+                q = check_chunk(c.text, c.chunk_id)
+                chunk_preview.append({
+                    "chunk_id": c.chunk_id,
+                    "text_preview": c.text[:200],
+                    "token_count": c.token_count,
+                    "quality": q,
+                })
+        except Exception as e:
+            chunk_preview = [{"error": str(e)}]
+        
+        return {
+            "version_id": version_id,
+            "title": v.title,
+            "full_text": full_text,
+            "full_text_length": len(full_text),
+            "quality_score": art.extraction_quality_score,
+            "warnings": warnings,
+            "dedup_hits": dedup_hits,
+            "chunk_preview": chunk_preview,
+            "total_chunks_estimate": len(chunk_preview),
+        }
+
+
 # ---------- 7) Publish ----------
 @router.post("/{doc_id}/versions/{version_id}/publish")
 def publish_version(
@@ -596,29 +694,66 @@ async def publish_version_async(
     async def _run():
         try:
             def _sync_work():
-                # ⚠️ progress_cb 를 세션 내부에서 쓰면 SQLite 데드락.
-                # 단계 업데이트는 세션 밖에서만 호출한다.
-                job_service.update_stage(job_id, "📝 청킹 중...", "", 10)
-                job_service.update_stage(job_id, "🧮 임베딩 생성 중...", "시작...", 15)
+                # ============================================================
+                # Phase 1: 청킹 + 품질게이트 (세션 내, 빠름)
+                # ============================================================
+                job_service.update_stage(job_id, "📝 청킹 중...", "", 5)
 
-                # 독립 세션 — 내부에서 job_service 호출 없음
                 with get_session() as s:
                     v = document_service.get_version(s, version_id)
                     if not v:
                         raise ValueError("version not found")
-                    snap = publish_service.publish_version(
-                        s, version=v,
-                        progress_cb=None,   # 데드락 방지: 세션 내 중첩 write 금지
+                    prep = publish_service.prepare_publish(s, version=v)
+                    _source_text = v.body_patch or (
+                        v.artifact.extracted_text if v.artifact else ""
+                    ) or ""
+                    s.commit()
+
+                # ============================================================
+                # Phase 2: 임베딩 (세션 밖 — progress_cb 안전!)
+                # ============================================================
+                embed_texts = prep["embed_texts"]
+                total = len(embed_texts)
+
+                embedder = get_embedder(settings.embedder)
+
+                all_vectors: list = []
+                for batch_start in range(0, total, 10):
+                    batch = embed_texts[batch_start: batch_start + 10]
+                    vecs = embedder.embed_documents(batch)
+                    if hasattr(vecs, "tolist"):
+                        all_vectors.extend(vecs.tolist())
+                    else:
+                        all_vectors.extend(vecs)
+                    done = min(batch_start + 10, total)
+                    pct = 15 + int((done / total) * 70)  # 15~85%
+                    job_service.update_stage(
+                        job_id, "🧮 임베딩 생성 중...",
+                        f"{done}/{total} 청크 완료", pct,
                     )
-                    _source_text = v.body_patch or (v.artifact.extracted_text if v.artifact else "") or ""
+
+                # ============================================================
+                # Phase 3: Qdrant upsert + DB (새 세션)
+                # ============================================================
+                job_service.update_stage(
+                    job_id, "🗂 Qdrant 인덱스 저장 중...", "", 85,
+                )
+
+                with get_session() as s:
+                    snap = publish_service.finalize_publish(
+                        s,
+                        version_id=version_id,
+                        prep=prep,
+                        vectors=all_vectors,
+                        embedder_name=settings.embedder,
+                    )
                     _result = {
                         "ok": True,
                         "snapshot_id": snap.snapshot_id,
                         "chunks": snap.chunk_count,
                         "collection": snap.collection_name,
                     }
-
-                # ← 세션 커밋+종료. 이후 job_service 쓰기 안전.
+                    s.commit()
 
                 # 자동 용어 추출 (세션 밖 — LLM 없음, 빠름)
                 from ..services.cleanup_pipeline import extract_terms as _extract_terms
@@ -632,9 +767,9 @@ async def publish_version_async(
                             f"{len(_terms)}개 발견", 95,
                         )
 
-                job_service.update_stage(job_id, "🗂 Qdrant 인덱스 저장 완료",
-                                         f"{_result['chunks']}개 청크", 90)
-                job_service.update_stage(job_id, "💾 DB 상태 업데이트 중...", "", 98)
+                job_service.update_stage(
+                    job_id, "💾 DB 상태 업데이트 중...", "", 98,
+                )
                 return _result
 
             result = await asyncio.to_thread(_sync_work)

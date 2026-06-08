@@ -1,7 +1,9 @@
 """품질 게이트 — 인덱싱 직전 청크 자동 검증 (Stage 7).
 
-목적: "조용한 오염" 방지. 빈/중복/과소·과대/신학왜곡 청크가 검색 인덱스에
+목적: "조용한 오염" 방지. 빈/중복/과소·과대 청크가 검색 인덱스에
       들어가지 못하게 막고, 차단 사유를 리포트로 반환한다.
+      hard_block(자해조장 등) 청크만 제외. legalism/false_assurance 는
+      설교문이 해당 주제를 반박할 수 있으므로 경고만 기록하고 통과.
 
 규칙 기반(LLM 무관)이라 빠르고 결정적. safety_service 의 신학왜곡 패턴을 재사용한다.
 
@@ -10,7 +12,7 @@
     result = run_quality_gate(chunks)
     if result.blocked:
         # 인덱싱 중단, result.report 로 사유 확인
-    clean_chunks = result.chunks   # 빈/중복 제거된 청크
+    clean_chunks = result.chunks   # 빈/중복/하드블록 제거된 청크
 """
 from __future__ import annotations
 
@@ -104,16 +106,23 @@ def run_quality_gate(chunks: list[Chunk]) -> GateResult:
         if c.token_estimate < min_tokens:
             stats["undersize"] += 1
 
-        # 5) 신학 왜곡 — 치명 차단
+        # 5) 신학 왜곡 검출 — 치명(hard_block)만 청크 제외, 나머지는 경고
         viols = _theology_violations(body)
         if viols:
             stats["theology_violations"].append({"chunk_id": c.chunk_id, "flags": viols})
-            errors.append(f"chunk#{c.chunk_id} 신학왜곡: {','.join(viols)}")
+            if "hard_block" in viols:
+                # 극단적 내용만 청크에서 제외 (예: 자해 조장 등)
+                errors.append(f"chunk#{c.chunk_id} hard_block 제외: {','.join(viols)}")
+                continue  # 이 청크는 clean에 추가하지 않음
+            else:
+                # legalism, false_assurance 는 주제 토론 가능 → 경고만
+                warnings.append(f"chunk#{c.chunk_id} 신학주의: {','.join(viols)} (경고만, 청크 유지)")
 
         clean.append(c)
 
-    # 차단 조건: 모든 청크 제거됨 OR 신학 왜곡 발생
-    blocked = (not clean) or bool(stats["theology_violations"])
+    # 차단 조건: 모든 청크가 제거된 경우만 차단
+    # (신학 위반은 경고로 처리, 설교문이 율법주의를 반박할 수 있으므로 차단 안 함)
+    blocked = not clean
 
     return GateResult(
         chunks=clean,

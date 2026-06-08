@@ -51,7 +51,9 @@ def split_korean_sentences(text: str) -> list[str]:
     5,000자 이상 텍스트는 빠른 regex 분리를 사용.
     """
     def _regex_split(t: str) -> list[str]:
-        parts = re.split(r"(?<=[.!?。…?!])\s+|\n{2,}", t)
+        # \s* : 한국어는 "은혜입니다.그러므로" 처럼 문장 종결 후 공백 없이
+        #       바로 다음 문장이 시작되는 경우가 많으므로 공백 선택적 처리.
+        parts = re.split(r"(?<=[.!?。…?!])\s*|\n{2,}", t)
         return [p.strip() for p in parts if p.strip()]
 
     if len(text) > 5000:

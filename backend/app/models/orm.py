@@ -31,7 +31,7 @@ def _uuid() -> str:
 
 
 def _now() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(datetime.UTC)
 
 
 # ---------------- Enums ----------------

@@ -25,7 +25,7 @@ def recent_interactions(
     days: int = 30,
 ) -> list[dict]:
     """최근 대화 N개. days일 안의 것만."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(datetime.UTC) - timedelta(days=days)
     with get_session() as s:
         rows = (
             s.query(Interaction)
@@ -106,7 +106,7 @@ def stats(subscriber_id: Optional[str] = None) -> dict:
             q = q.filter(Interaction.subscriber_id == subscriber_id)
         total = q.count()
         # 지난 7일
-        cutoff = datetime.utcnow() - timedelta(days=7)
+        cutoff = datetime.now(datetime.UTC) - timedelta(days=7)
         recent = q.filter(Interaction.created_at >= cutoff).count()
         return {"total": total, "last_7_days": recent}
 

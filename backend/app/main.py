@@ -61,8 +61,9 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_cors_origins,
         allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*", "X-Request-ID"],
+        allow_methods=["GET", "POST", "OPTIONS"],  # P3: 명시적 메서드 제한
+        allow_headers=["X-Request-ID", "Content-Type", "Authorization"],  # P3: 필요한 헤더만
+        expose_headers=["X-Request-ID"],  # 클라이언트가 읽을 수 있는 헤더
     )
 
     init_db()
@@ -147,7 +148,8 @@ def create_app() -> FastAPI:
         log.info("  Langfuse  : %s", "ON" if settings.langfuse_enabled else "OFF")
         log.info("  CORS      : %s", settings.cors_origins)
         if settings.admin_api_key == "change-me":
-            log.warning("⚠️  SECURITY: admin_api_key 가 기본값입니다. .env 에서 반드시 변경하세요!")
+            log.critical("⛔ SECURITY: admin_api_key 가 기본값 — 관리자 API 비활성화됨")
+            log.critical("   .env 파일에 ADMIN_API_KEY 를 설정하고 서버를 재시작하세요.")
         if settings.dify_api_key == "change-me":
             log.warning("⚠️  SECURITY: dify_api_key 가 기본값입니다.")
 
