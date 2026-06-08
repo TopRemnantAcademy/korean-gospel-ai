@@ -30,7 +30,49 @@ license: mit
 | 운영 UI | **Streamlit Admin** (최소) | - |
 | 외부 통합 | **Dify External Knowledge API 호환 `/retrieval`** | - |
 
-## 🚀 로컬 실행 (5단계)
+## 🚀 배포 (Deployment)
+
+### Docker Compose (추천)
+
+```bash
+# 1. 프로덕션 환경 설정
+cp .env.production.template .env.production
+nano .env.production  # 모든 비밀키 설정
+
+# 2. 배포 스크립트 실행
+chmod +x deploy.sh
+./deploy.sh production
+
+# 3. 서비스 확인
+curl http://localhost:8000/health
+```
+
+**배포 가이드**: `DEPLOYMENT_GUIDE.md` 참조
+**모니터링 가이드**: `MONITORING_GUIDE.md` 참조
+
+### Railway (가장 쉬움)
+
+1. [Railway](https://railway.app) 가입
+2. "New Project" → "Deploy from GitHub repo"
+3. `TopRemnantAcademy/korean-gospel-ai` 선택
+4. Environment Variables에 `.env.production` 내용 입력
+5. "Deploy" 클릭
+
+### Fly.io
+
+```bash
+# Fly CLI 설치
+curl -L https://fly.io/install.sh | sh
+
+# 배포
+fly launch
+fly secrets set ADMIN_API_KEY=<key>
+fly deploy
+```
+
+---
+
+## 📊 모니터링 (Monitoring)
 
 ```bash
 # 1) 의존성 설치
@@ -168,7 +210,29 @@ korean-gospel-ai/
     └── start_local.bat / .sh
 ```
 
-## 🔐 보안
+## 📊 모니터링 (Monitoring)
+
+### Langfuse (추천)
+
+```bash
+# .env.production
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+```
+
+- **대시보드**: https://cloud.langfuse.com
+- **기능**: LLM 추적, 지연 시간, 토큰 사용량, 사용자 피드백
+- **가이드**: `MONITORING_GUIDE.md` 참조
+
+### Qdrant Cloud
+
+- **대시보드**: https://cloud.qdrant.tech
+- **기능**: 컬렉션 상태, 메모리 사용량, 쿼리 성능
+
+---
+
+## 🔒 보안 체크리스트
 
 - `.env` 절대 커밋 금지 (`.gitignore` 처리됨)
 - Bearer 토큰 분리: `ADMIN_API_KEY`(/ingest, /eval, /admin) · `DIFY_API_KEY`(/retrieval)

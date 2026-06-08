@@ -1,0 +1,142 @@
+# =========================================================
+# Korean Gospel AI - Production Docker Compose
+# =========================================================
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d
+# =========================================================
+
+version: '3.8'
+
+services:
+  # ---- Qdrant Vector Database ----
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    container_name: korean-gospel-qdrant-prod
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+      - ./qdrant_config.yaml:/qdrant/config/production.yaml:ro
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    networks:
+      - gospel-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---- Backend API (FastAPI) ----
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: korean-gospel-backend-prod
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./gospel.db:/app/gospel.db
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      # LLM
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      # Embedder
+      - EMBEDDER=${EMBEDDER:-kure}
+      - EMBEDDER_LIST=${EMBEDDER_LIST:-kure}
+      # Qdrant
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - QDRANT_COLLECTION_PREFIX=${QDRANT_COLLECTION_PREFIX:-gospel}
+      # Reranker
+      - RERANKER=${RERANKER:-bge_m3}
+      # Auth
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - APP_PASSWORD=${APP_PASSWORD}
+      - DIFY_API_KEY=${DIFY_API_KEY}
+      # Rate Limiting
+      - TOKEN_QUOTA_ENABLED=${TOKEN_QUOTA_ENABLED:-true}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-10}
+      # Langfuse
+      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-true}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      # Other
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DATA_DIR=/app/data/documents
+      - MAX_UPLOAD_SIZE_MB=${MAX_UPLOAD_SIZE_MB:-100}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    networks:
+      - gospel-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---- User UI (Streamlit) ----
+  user-ui:
+    image: python:3.11-slim
+    container_name: korean-gospel-user-ui-prod
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./user:/app/user
+      - ./data:/app/data
+    working_dir: /app
+    command: >
+      sh -c "pip install -q streamlit httpx pillow python-dotenv langfuse &&
+             streamlit run user/app.py --server.port 8501 --server.address 0.0.0.0"
+    environment:
+      - API_BASE=http://backend:8000
+      - APP_PASSWORD=${APP_PASSWORD}
+    depends_on:
+      - backend
+    networks:
+      - gospel-network
+
+  # ---- Admin UI (Streamlit) ----
+  admin-ui:
+    image: python:3.11-slim
+    container_name: korean-gospel-admin-ui-prod
+    restart: unless-stopped
+    ports:
+      - "8502:8502"
+    volumes:
+      - ./admin:/app/admin
+      - ./data:/app/data
+    working_dir: /app
+    command: >
+      sh -c "pip install -q streamlit httpx pillow python-dotenv plotly langfuse &&
+             streamlit run admin/app.py --server.port 8502 --server.address 0.0.0.0"
+    environment:
+      - API_BASE=http://backend:8000
+      - APP_PASSWORD=${APP_PASSWORD}
+    depends_on:
+      - backend
+    networks:
+      - gospel-network
+
+networks:
+  gospel-network:
+    driver: bridge
+
+volumes:
+  qdrant_data:
+    driver: local

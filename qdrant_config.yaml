@@ -1,0 +1,40 @@
+# =========================================================
+# Korean Gospel AI - Production Qdrant Configuration
+# =========================================================
+
+service:
+  api_key:
+    - ${QDRANT_API_KEY}
+  
+  # Enable telemetry (optional)
+  telemetry:
+    enabled: false
+
+  # Timeout settings
+  request_timeout: 30
+  connection_timeout: 10
+
+storage:
+  # Storage path (Docker volume mount)
+  path: ./storage
+
+  # Memory mapping (faster search)
+  memmap_threshold: 0
+
+  # Wal (Write-Ahead Log) settings
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+
+  # Performance
+  performance_hint:
+    max_search_threads: 4
+    max_indexing_threads: 4
+
+cluster:
+  # Single node (for now)
+  enabled: false
+
+telemetry:
+  # Disable telemetry for privacy
+  disabled: true
