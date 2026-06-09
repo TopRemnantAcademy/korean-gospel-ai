@@ -3,6 +3,9 @@
 # 메모리 최적화: 로컬 ML 모델 없음 → EMBEDDER=hf_inference, RERANKER=none
 # Qdrant: 클라우드 모드 (QDRANT_URL=https://xxx.qdrant.tech)
 # SQLite:  /data 볼륨 마운트 (Railway: Volumes > /data)
+#
+# 통합 구조 (2026-06-09):
+#   app.py + backend/ 만 복사 (admin/, user/ 는 app.py 가 import)
 # ─────────────────────────────────────────────────────────────────────────────
 
 FROM python:3.11-slim
@@ -18,15 +21,15 @@ WORKDIR /app
 COPY requirements-deploy.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ── 소스코드 복사 ─────────────────────────────────────────────────────────
+# ── 소스코드 복사 (통합 구조) ────────────────────────────────────────────
 COPY backend ./backend
-COPY user ./user
+COPY app.py .
 COPY admin ./admin
+COPY user ./user
 COPY data ./data
 COPY alembic.ini .
 
 # ── 데이터 디렉토리 (Railway Volume 마운트 대상: /data) ────────────────────
-# 실제 런타임 데이터(SQLite, 업로드 파일)는 환경변수로 경로 지정
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DATA_DIR=/data/documents \

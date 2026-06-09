@@ -511,9 +511,27 @@ async def chat_stream(req: ChatRequest):
     if not in_pol.allowed:
         raise HTTPException(status_code=400, detail=in_pol.reason)
 
-    # ⚡ 1.5) G-1: 입력 분류 (병렬 실행 준비)
-    from ..services.subscriber_service import get_or_create as _get_sub
-    _stream_profile = _get_sub(sub_id)
+    # 1.1) E-A: 토큰 쿼터 확인 (stream 패리티 복구)
+    quote = await check_and_consume(sub_id, _settings.token_estimate_per_request)
+    if not quote.allowed:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "token_quota_exhausted",
+                "remaining": {
+                    "daily": quote.remaining_daily,
+                    "monthly": quote.remaining_monthly,
+                    "bonus": quote.remaining_bonus,
+                },
+                "reset_in_hours": quote.reset_in_hours,
+                "upgrade_url": "/signup",
+            },
+        )
+
+    # ⚡ 2) 기존 DB 프로필 로드 (LLM 없음 — 빠른 DB 읽기만)
+    from ..services.subscriber_service import prepare_profile as _stream_prepare, get_or_create as _get_sub
+    _stream_profile = await asyncio.to_thread(_stream_prepare, sub_id, None)
 
     # 검색용 리트리버 미리 생성
     effective_embedder = _route_embedder(req.embedder, req.target_lang)
@@ -572,23 +590,28 @@ async def chat_stream(req: ChatRequest):
             }
         )
 
-    # D-C14: 구원 신호 감지 (백그라운드)
-    try:
-        _sal_signal = await detect_salvation_signal(
-            req.query, _stream_profile.get("salvation_status", "unknown")
-        )
-        if _sal_signal.signal_type:
-            await salvation_transition(sub_id, _sal_signal)
-            _stream_profile = _get_sub(sub_id)
-            if trace:
-                trace.event(name="salvation_signal", output={
-                    "signal_type": _sal_signal.signal_type,
-                    "suggested_status": _sal_signal.suggested_status,
-                    "confidence": _sal_signal.confidence,
-                })
-    except Exception as _e:
-        if trace:
-            trace.event(name="salvation_detect_failed", output={"error": str(_e)})
+    # ⚡ BACKGROUND: 프로필 LLM 신호 업데이트 + 구원 감지 (/chat 패리티)
+    _q_snap = req.query
+    _lang_snap = req.target_lang
+    _sal_status_snap = _stream_profile.get("salvation_status", "unknown")
+
+    async def _bg_profile_update():
+        try:
+            from ..services.llm.router import classify_user_signal as _cls_sig
+            _sig = await _cls_sig(_q_snap) or {}
+            if _sig:
+                await asyncio.to_thread(_stream_prepare, sub_id, _sig)
+        except Exception:
+            pass
+        if _settings.salvation_detection_enabled:
+            try:
+                _sal = await detect_salvation_signal(_q_snap, _sal_status_snap)
+                if _sal.signal_type:
+                    await salvation_transition(sub_id, _sal)
+            except Exception:
+                pass
+
+    asyncio.create_task(_bg_profile_update())
 
     # 3) 프롬프트 구성
     user_prompt = build_user_prompt(req.query, [it.text for it in items], target_lang=req.target_lang)
@@ -649,9 +672,21 @@ async def chat_stream(req: ChatRequest):
         if gen_span:
             gen_span.end(output=full_text)
 
-        # G-4.5/G-4.6: 아첨 필터 + 재생성
+        # G-4.5/G-4.6: 아첨 필터 (Layer A: regex → Layer B: LLM judge → Layer C: regen)
         stream_filter = check_flattery(full_text, target_lang=req.target_lang)
         final_text = full_text
+
+        # Layer B: LLM 품질 심사 (background — /chat 패리티)
+        async def _bg_stream_judge():
+            try:
+                _out_j = await judge_output(_q_snap, final_text, target_lang=_lang_snap)
+                if trace:
+                    trace.event(name="output_policy_stream", input=final_text, output=_out_j.model_dump())
+            except Exception:
+                pass
+        if _settings.policy_enabled:
+            asyncio.create_task(_bg_stream_judge())
+
         if stream_filter.violated:
             _violations = stream_filter.matched_patterns[:3]
             new_text, _status = await regenerate_strict(
@@ -674,6 +709,18 @@ async def chat_stream(req: ChatRequest):
             yield verdict.appended_text
         if trace and verdict.triggered:
             trace.event(name="safety_triggered", output={"codes": verdict.triggered, "blocked": verdict.blocked})
+
+        # === C3: 온보딩 질문 자동 추가 (/chat 패리티 복구) ===
+        from ..services.onboarding_service import check_and_get_onboarding_question
+        onboarding_q = check_and_get_onboarding_question(sub_id)
+        if onboarding_q:
+            yield onboarding_q
+
+        # E-A: 실제 토큰 정산 (/chat 패리티 복구)
+        try:
+            await finalize_consumption(sub_id, 0, _settings.token_estimate_per_request)
+        except Exception:
+            pass
 
         # 로그 저장
         elapsed_ms = int((time.time() - t0_stream) * 1000)

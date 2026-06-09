@@ -52,7 +52,7 @@ echo   2. 다른 CMD 를 열고: STEP4_TUNNEL.bat status
 echo   3. Tunnel 종료: Ctrl+C 누르거나 STEP4_TUNNEL.bat stop
 echo.
 echo 💡 팁:
-echo   - Tunnel 이 실행 중이면 user/app.py, admin/app.py 시작 가능
+echo   - Tunnel 이 실행 중이면 통합 app.py 시작 가능
 echo   - gospel-ai.trycloudflare.com 으로 접속 가능
 echo   - 로그: TUNNEL_LOGS.txt
 echo.
@@ -93,8 +93,7 @@ echo    - User  : https://gospel-ai.trycloudflare.com
 echo    - Admin : https://admin-gospel-ai.trycloudflare.com
 echo.
 echo 📋 Streamlit 앱도 실행해야 합니다:
-echo    - python -m streamlit run user/app.py --server.port 8502
-echo    - python -m streamlit run admin/app.py --server.port 8501 (선택)
+echo    - python -m streamlit run app.py --server.port 8501
 echo.
 echo ============================================================
 echo.

@@ -186,41 +186,7 @@ def update_profile(sub_id: str, fields: Dict[str, Any], *, by_operator: bool = F
     # 변경 후 최신 dict 반환
     return get_or_create(sub_id)
 
-def increment_session(sub_id: str):
-    with get_session() as s:
-        sub = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
-        if sub:
-            sub.session_count += 1
-            s.commit()
-
-def increment_question(sub_id: str):
-    """total_questions 원자적 증가 + last_active_at 갱신.
-
-    벌크 UPDATE는 ORM onupdate 훅을 우회하므로 last_active_at 를 명시적으로 함께 갱신한다.
-    """
-    from datetime import datetime
-    with get_session() as s:
-        s.execute(
-            sa_update(Subscriber)
-            .where(Subscriber.subscriber_id == sub_id)
-            .values(
-                total_questions=Subscriber.total_questions + 1,
-                last_active_at=datetime.now(datetime.UTC),
-            )
-        )
-
-def merge_auto_signal(sub_id: str, signal: Dict[str, Any]):
-    """AI가 추출한 사용자 상태 신호 병합 (빈 값만 채움)"""
-    with get_session() as s:
-        sub = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
-        if not sub:
-            return
-            
-        if "emotional_state" in signal and not sub.emotional_state:
-            sub.emotional_state = signal["emotional_state"]
-        if "journey_hint" in signal and not sub.journey_stage:
-            sub.journey_stage = signal["journey_hint"]
-        if "faith_hint" in signal and not sub.faith_stage:
-            sub.faith_stage = signal["faith_hint"]
-            
-        s.commit()
+# ──────────────────────────────────────────────────────────────────────────────
+# NOTE: increment_session / increment_question / merge_auto_signal 제거 (2026-06-09)
+#       prepare_profile() 에 흡수되어 실제 호출 없음 — 데드코드 정리
+# ──────────────────────────────────────────────────────────────────────────────

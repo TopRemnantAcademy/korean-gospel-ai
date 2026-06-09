@@ -1,7 +1,7 @@
 @echo off
 REM ===================================================================
 REM  Korean Gospel RAG v3 - STEP 3 of 3 : START
-REM  Local only (127.0.0.1). Both API and Admin UI inherit PYTHONPATH.
+REM  통합 앱 — 채팅 + 관리 콘솔을 포트 하나(:8501)로 실행
 REM ===================================================================
 setlocal
 cd /d "%~dp0"
@@ -28,10 +28,10 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-venv\Scripts\python.exe -c "import sys, os; sys.path.insert(0, os.getcwd()); from admin.lib.api_client import get_health; print('  [OK] admin imports OK')"
+venv\Scripts\python.exe -c "import sys, os; sys.path.insert(0, os.getcwd()); from admin.lib.api_client import get_health; print('  [OK] app imports OK')"
 if errorlevel 1 (
     echo.
-    echo [ERROR] Admin UI imports broken. Run DIAGNOSE.bat.
+    echo [ERROR] App imports broken. Run DIAGNOSE.bat.
     pause
     exit /b 1
 )
@@ -57,28 +57,24 @@ exit /b 1
 :API_READY
 echo [OK] API is up.
 
-REM ---------- Start Admin UI ----------
+REM ---------- Start Unified App ----------
 echo.
-echo [INFO] Launching Admin UI  (127.0.0.1:8501) ...
-start "Gospel Admin (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && venv\Scripts\python.exe -m streamlit run admin\app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false"
+echo [INFO] Launching Unified App  (127.0.0.1:8501) ...
+echo        [채팅] + [관리 콘솔] 통합 — 사이드바 하단 '관리자 모드' 버튼으로 전환
+start "Gospel App (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && venv\Scripts\python.exe -m streamlit run app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false"
 
-timeout /t 2 /nobreak >nul
-echo [INFO] Launching User UI  (127.0.0.1:8502) ...
-start "Gospel User (do not close)" cmd /k "cd /d %~dp0 && set PYTHONPATH=%~dp0 && venv\Scripts\python.exe -m streamlit run user\app.py --server.port 8502 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false"
-
-timeout /t 5 /nobreak >nul
+timeout /t 4 /nobreak >nul
 start "" "http://127.0.0.1:8501"
-timeout /t 1 /nobreak >nul
-start "" "http://127.0.0.1:8502"
 
 echo.
 echo ===================================================================
 echo  [RUNNING]
-echo    Admin UI : http://127.0.0.1:8501
-echo    API docs : http://127.0.0.1:8000/docs
-echo    User UI  : http://127.0.0.1:8502    ^(simple end-user view^)
+echo    통합 앱   : http://127.0.0.1:8501  (채팅 + 관리 콘솔)
+echo    API docs  : http://127.0.0.1:8000/docs
+echo    Qdrant    : http://127.0.0.1:6333/dashboard
 echo.
-echo  To stop  : close the three 'Gospel API', 'Gospel Admin', 'Gospel User' windows.
+echo  관리자 모드: 사이드바 하단 '관리자 모드' 버튼 클릭
+echo  종료하려면: 'Gospel API', 'Gospel App' 창을 닫으세요.
 echo ===================================================================
 echo.
 pause

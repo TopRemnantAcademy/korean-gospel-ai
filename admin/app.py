@@ -77,6 +77,8 @@ with st.sidebar:
     st.divider()
     if APP_PASSWORD and st.button("로그아웃", use_container_width=True, key="logout_btn"):
         st.session_state.auth_ok = False
+        st.session_state.admin_auth_ok = False  # 통합 앱 호환
+        st.session_state.admin_mode = False      # 통합 앱 호환 — 채팅으로 복귀
         st.rerun()
 
 

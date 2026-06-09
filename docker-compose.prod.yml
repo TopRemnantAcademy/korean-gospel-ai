@@ -4,6 +4,12 @@
 # Usage:
 #   docker compose -f docker-compose.prod.yml up -d
 # =========================================================
+#
+# 통합 구조 (2026-06-09):
+#   user/app.py + admin/app.py → 통합 app.py (1개 앱)
+#   서비스: qdrant + backend + ui (3개)
+#
+# =========================================================
 
 version: '3.8'
 
@@ -89,42 +95,19 @@ services:
       timeout: 10s
       retries: 3
 
-  # ---- User UI (Streamlit) ----
-  user-ui:
+  # ---- 통합 UI (Streamlit) ----
+  ui:
     image: python:3.11-slim
-    container_name: korean-gospel-user-ui-prod
+    container_name: korean-gospel-ui-prod
     restart: unless-stopped
     ports:
       - "8501:8501"
     volumes:
-      - ./user:/app/user
-      - ./data:/app/data
-    working_dir: /app
-    command: >
-      sh -c "pip install -q streamlit httpx pillow python-dotenv langfuse &&
-             streamlit run user/app.py --server.port 8501 --server.address 0.0.0.0"
-    environment:
-      - API_BASE=http://backend:8000
-      - APP_PASSWORD=${APP_PASSWORD}
-    depends_on:
-      - backend
-    networks:
-      - gospel-network
-
-  # ---- Admin UI (Streamlit) ----
-  admin-ui:
-    image: python:3.11-slim
-    container_name: korean-gospel-admin-ui-prod
-    restart: unless-stopped
-    ports:
-      - "8502:8502"
-    volumes:
-      - ./admin:/app/admin
-      - ./data:/app/data
+      - ./:/app
     working_dir: /app
     command: >
       sh -c "pip install -q streamlit httpx pillow python-dotenv plotly langfuse &&
-             streamlit run admin/app.py --server.port 8502 --server.address 0.0.0.0"
+             streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
     environment:
       - API_BASE=http://backend:8000
       - APP_PASSWORD=${APP_PASSWORD}

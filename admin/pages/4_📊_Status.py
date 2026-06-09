@@ -295,7 +295,9 @@ with tab_tier:
         else:
             st.info("리소스 사용 데이터를 불러올 수 없습니다.")
     except ImportError:
-        st.info("tier_monitor 서비스가 없어 리소스 현황을 표시할 수 없습니다.")
+        # tier_monitor.py 제거됨 (2026-06-09 리팩터링)
+        # 실시간 리소스 측정은 backend /health 또는 Langfuse 대시보드 사용
+        st.info("💡 실시간 리소스 모니터링은 Langfuse 대시보드 또는 서버 로그를 확인하세요.")
     except Exception as _e:
         st.warning(f"리소스 측정 오류: {_e}")
 

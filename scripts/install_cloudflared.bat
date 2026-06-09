@@ -84,12 +84,12 @@ REM Create config.yml
     echo.
     echo ingress:
     echo   - hostname: gospel-ai.trycloudflare.com
-    echo     service: http://localhost:8502
-    echo     # User UI - 공개 접근, 베타 초대 코드 필요
+    echo     service: http://localhost:8501
+    echo     # 통합 UI - 채팅 모드 (공개 접근)
     echo.
     echo   - hostname: admin-gospel-ai.trycloudflare.com
     echo     service: http://localhost:8501
-    echo     # Admin UI - Cloudflare Access 로 보호
+    echo     # 통합 UI - 내부에서 관리자 모드 전환
     echo.
     echo   - service: http_status:404
     echo     # 기타 URL 은 404 반환
@@ -114,8 +114,8 @@ echo.
 echo 다음 단계:
 echo 1. STEP4_TUNNEL.bat 실행 → Tunnel 시작
 echo 2. docs/TUNNEL_GUIDE.md 읽기 → 친구 초대 방법
-echo 3. user/app.py 앱 시작 (포트 8502)
-echo 4. admin/app.py 앱 시작 (포트 8501, 선택)
+echo 3. 통합 app.py 앱 시작 (포트 8501)
+echo    python -m streamlit run app.py --server.port 8501
 echo.
 echo 💡 팁:
 echo    - 초대 코드 발급: docs/TUNNEL_GUIDE.md 참조
