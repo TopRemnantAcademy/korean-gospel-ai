@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
 
 from ..config import settings
+from ..models.schemas import PromptIn
 from ..services import prompt_service
 
 
@@ -19,10 +19,7 @@ def _check_admin(authorization):
         raise HTTPException(status_code=403, detail="invalid admin token")
 
 
-class PromptIn(BaseModel):
-    content: str
-    note: Optional[str] = None
-
+# PromptIn → models/schemas.py 로 이전됨
 
 @router.get("/current")
 def get_current(authorization: Optional[str] = Header(default=None)):

@@ -11,11 +11,11 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
 
 from ..config import settings
 from ..db import get_session
 from ..models.orm import DocumentDraft, DocumentVersion
+from ..models.schemas import DraftIn
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
 
@@ -27,11 +27,7 @@ def _check_admin(authorization: Optional[str]):
         raise HTTPException(403, "invalid admin token")
 
 
-class DraftIn(BaseModel):
-    draft_body: Optional[str] = None
-    draft_meta: Optional[dict] = None
-    device_id: str = "browser"
-    operator_id: str = "admin"
+# DraftIn → models/schemas.py 로 이전됨
 
 
 @router.put("/{version_id}")

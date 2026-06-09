@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 
 from ..config import settings
+from ..models.schemas import FeedbackIn
 from ..services import memory_service
 
 
@@ -53,12 +54,7 @@ def delete(
 
 
 
-from pydantic import BaseModel
-
-
-class FeedbackIn(BaseModel):
-    value: int  # +1 / -1 / 0
-
+# FeedbackIn → models/schemas.py 로 이전됨
 
 @router.patch("/{interaction_id}/feedback")
 def set_feedback(

@@ -92,6 +92,7 @@ from ..models.orm import Interaction
 
 from ..models.schemas import (
     ChatRequest, ChatResponse, SourceItem, PolicyInfo,
+    FeedbackRequest, GreetingResponse,
 )
 from ..services.retriever import HybridRetriever, get_retriever
 from ..services.llm.base import Message
@@ -741,11 +742,7 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(gen(), media_type="text/plain")
 
 
-class FeedbackRequest(BaseModel):
-    interaction_id: str
-    value: int
-    user_id: Optional[str] = None
-
+# FeedbackRequest → models/schemas.py 로 이전됨
 
 # ── 재방문 판별 Ping (초경량) ─────────────────────────────────────────────────
 
@@ -799,14 +796,7 @@ def chat_ping(user_id: Optional[str] = None):
 
 
 # ── 재방문 환영 메시지 (영적 재해석) ──────────────────────────────────────────
-
-class GreetingResponse(BaseModel):
-    greeting: str
-    mode_used: str              # "rule" | "llm"
-    days_since_last_visit: Optional[int]
-    is_first_visit: bool
-    subscriber_id: str
-
+# GreetingResponse → models/schemas.py 로 이전됨
 
 @router.get("/chat/greeting/simulate")
 def simulate_greeting(

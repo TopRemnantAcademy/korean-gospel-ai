@@ -14,10 +14,10 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
 
 from ..config import settings
 from ..db import get_session
+from ..models.schemas import ApproveIn, MergeIn, PatchTermIn
 from ..services import glossary_service
 
 router = APIRouter(prefix="/glossary", tags=["glossary"])
@@ -30,23 +30,7 @@ def _check_admin(authorization: Optional[str]):
         raise HTTPException(403, "invalid admin token")
 
 
-# ── 요청 모델 ──────────────────────────────────────────────────────────────
-class ApproveIn(BaseModel):
-    is_theology: bool = False
-    definition: Optional[str] = None
-    category: Optional[str] = None
-
-
-class MergeIn(BaseModel):
-    alias_ids: list[int]
-
-
-class PatchTermIn(BaseModel):
-    definition: Optional[str] = None
-    category: Optional[str] = None
-    canonical_form: Optional[str] = None
-    is_theology_term: Optional[bool] = None
-
+# ── 요청 모델 → models/schemas.py 로 이전됨 (ApproveIn, MergeIn, PatchTermIn)
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
 

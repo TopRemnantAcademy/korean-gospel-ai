@@ -218,3 +218,198 @@ class EvalTuneWeightsResponse(BaseModel):
     trials: list[dict[str, Any]] = Field(default_factory=list)
     env_hint: Optional[str] = None
     reason: Optional[str] = None
+
+
+# ===== /auth =====
+
+class SignupReq(BaseModel):
+    email: str
+    password: str
+    display_name: Optional[str] = None
+    guest_sub_id: Optional[str] = None   # 기존 guest 대화 승계
+
+
+class LoginReq(BaseModel):
+    email: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    sub_id: str
+    token: str
+    subscription_tier: str
+    tokens_bonus: int
+    tokens_monthly: int
+    tokens_daily: int
+    display_name: Optional[str]
+    is_new: bool
+
+
+# ===== /chat (추가 모델) =====
+
+class FeedbackRequest(BaseModel):
+    interaction_id: str
+    value: int
+    user_id: Optional[str] = None
+
+
+class GreetingResponse(BaseModel):
+    greeting: str
+    mode_used: str              # "rule" | "llm"
+    days_since_last_visit: Optional[int]
+    is_first_visit: bool
+    subscriber_id: str
+
+
+# ===== /documents =====
+
+class DraftMetaIn(BaseModel):
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    topic_tags: Optional[list[str]] = None
+    scripture_refs: Optional[list[str]] = None
+    checklist: Optional[dict] = None
+
+
+class DocMetaIn(BaseModel):
+    """document 레벨 메타 (버전 독립) — speaker / series / doc_type."""
+    speaker: Optional[str] = None
+    series: Optional[str] = None
+    doc_type: Optional[str] = None
+
+
+class BodyPatchIn(BaseModel):
+    body: str
+
+
+class DocumentSummary(BaseModel):
+    doc_id: str
+    doc_key: str
+    doc_type: str
+    title: str
+    series: Optional[str]
+    speaker: Optional[str]
+    is_canonical: bool
+    latest_version: int
+    latest_state: str
+    published_version: Optional[int]
+    updated_at: str
+
+
+class VersionDetail(BaseModel):
+    version_id: str
+    doc_id: str
+    version_number: int
+    state: str
+    title: str
+    summary: Optional[str]
+    topic_tags: list[str]
+    scripture_refs: list[str]
+    body_patch: Optional[str]
+    jsonl_path: Optional[str] = None
+    extracted_text_preview: str
+    extraction_quality_score: int
+    extraction_warnings: dict
+    checklist: dict
+
+
+class CleanupIn(BaseModel):
+    stages: list[int] = Field(default_factory=lambda: [5])   # 용어 추출만
+    dry_run: bool = False
+
+
+class BulkActionIn(BaseModel):
+    doc_ids: list[str]
+    action: str  # "publish" | "archive"
+
+
+# ===== /drafts =====
+
+class DraftIn(BaseModel):
+    draft_body: Optional[str] = None
+    draft_meta: Optional[dict] = None
+    device_id: str = "browser"
+    operator_id: str = "admin"
+
+
+# ===== /glossary =====
+
+class ApproveIn(BaseModel):
+    is_theology: bool = False
+    definition: Optional[str] = None
+    category: Optional[str] = None
+
+
+class MergeIn(BaseModel):
+    alias_ids: list[int]
+
+
+class PatchTermIn(BaseModel):
+    definition: Optional[str] = None
+    category: Optional[str] = None
+    canonical_form: Optional[str] = None
+    is_theology_term: Optional[bool] = None
+
+
+# ===== /memory =====
+
+class FeedbackIn(BaseModel):
+    value: int  # +1 / -1 / 0
+
+
+# ===== /prompts =====
+
+class PromptIn(BaseModel):
+    content: str
+    note: Optional[str] = None
+
+
+# ===== /subscribers =====
+
+class UserProfileUpdateReq(BaseModel):
+    """일반 사용자가 직접 수정할 수 있는 필드만 포함."""
+    display_name: Optional[str] = None
+    journey_stage: Optional[str] = None
+    faith_stage: Optional[str] = None
+    emotional_state: Optional[str] = None
+    age_group: Optional[str] = None
+    gender: Optional[str] = None
+    current_struggle: Optional[str] = None
+    preferred_tone: Optional[str] = None
+    is_darakbang_member: Optional[bool] = None
+    darakbang_chapter: Optional[str] = None
+    consent_data: Optional[bool] = None
+    consent_kakao: Optional[bool] = None
+
+
+class ProfileUpdateReq(BaseModel):
+    """운영자용 전체 프로필 수정 (운영자 전용 필드 포함)."""
+    display_name: Optional[str] = None
+    journey_stage: Optional[str] = None
+    faith_stage: Optional[str] = None
+    emotional_state: Optional[str] = None
+    age_group: Optional[str] = None
+    gender: Optional[str] = None
+    current_struggle: Optional[str] = None
+    preferred_tone: Optional[str] = None
+    is_darakbang_member: Optional[bool] = None
+    consent_data: Optional[bool] = None
+    consent_kakao: Optional[bool] = None
+    # 운영자 전용 필드
+    salvation_status: Optional[str] = None
+    assume_saved: Optional[bool] = None
+    darakbang_role: Optional[str] = None
+    darakbang_chapter: Optional[str] = None
+    darakbang_verified: Optional[bool] = None
+
+
+class AssumeSavedReq(BaseModel):
+    value: bool
+    reason: Optional[str] = None
+    also_set_status: Optional[str] = None   # 동시에 salvation_status 변경 (선택)
+
+
+class GrantTokensReq(BaseModel):
+    sub_id: str
+    amount: int
+    reason: Optional[str] = None

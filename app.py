@@ -1,4 +1,4 @@
-"""통합 앱 — 채팅 UI + 관리 콘솔을 하나의 Streamlit 앱으로.
+"""통합 앱 — 복음 AI 채팅 + 관리 콘솔
 
 실행: streamlit run app.py --server.port 8501
 포트 하나로 사용자 채팅 + 관리자 기능 모두 제공.
@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
+import httpx
 from pathlib import Path
+from datetime import datetime
 
 _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
@@ -19,118 +22,629 @@ from dotenv import load_dotenv
 load_dotenv(_ROOT / ".env")
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+API_BASE     = os.getenv("API_BASE", "http://127.0.0.1:8000")
 QDRANT_URL   = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
 
-# ── 세션 초기화 ──────────────────────────────────────────────────────────────
-if "admin_mode" not in st.session_state:
-    st.session_state.admin_mode = False
-if "admin_auth_ok" not in st.session_state:
-    st.session_state.admin_auth_ok = False
+# ══════════════════════════════════════════════════════════════════════════════
+# 페이지 설정 (최우선)
+# ══════════════════════════════════════════════════════════════════════════════
+st.set_page_config(
+    page_title="복음 AI",
+    page_icon="🌿",
+    layout="centered",
+    initial_sidebar_state="auto",
+)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 세션 초기화
+# ══════════════════════════════════════════════════════════════════════════════
+_DEFAULTS = {
+    "mode":              "chat",       # "chat" | "admin_login" | "admin"
+    "auth_ok":           False,        # admin/pages gate() 호환
+    "subscriber_id":     "anon_" + uuid.uuid4().hex[:12],
+    "msgs":              [],
+    "conversations":     [],
+    "auth_token":        None,
+    "user_display_name": None,
+    "theme":             "light",
+    "streaming_mode":    False,
+}
+for k, v in _DEFAULTS.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 테마
+# ══════════════════════════════════════════════════════════════════════════════
+THEMES = {
+    "light": dict(
+        app_bg="#FFFFFF", sidebar_bg="#F0F4F9", sidebar_hover="#E3EAF4",
+        sidebar_text="#1F1F1F", input_bg="#F0F4F9", input_border="#C4C7C5",
+        input_focus="#1A7340", text="#1F1F1F", text_sub="#444746",
+        text_muted="#72777A", divider="#E3E3E3", accent="#1A7340",
+        btn_bg="#1A7340", btn_text="#FFFFFF", popup_bg="#FFFFFF",
+        user_msg_bg="#E8F5E9", dark=False,
+    ),
+    "dark": dict(
+        app_bg="#131314", sidebar_bg="#1E1F20", sidebar_hover="#2A2B2C",
+        sidebar_text="#E3E3E3", input_bg="#1E1F20", input_border="#444746",
+        input_focus="#4CAF50", text="#E3E3E3", text_sub="#C4C7C5",
+        text_muted="#8E918F", divider="#2A2B2C", accent="#4CAF50",
+        btn_bg="#2E7D32", btn_text="#FFFFFF", popup_bg="#2A2B2C",
+        user_msg_bg="#1A2E1F", dark=True,
+    ),
+}
+_TK = st.session_state.theme
+_T  = THEMES[_TK]
 
 
-# ── 페이지 정의 ──────────────────────────────────────────────────────────────
-chat_page = st.Page("user/app.py", title="복음 AI 채팅", icon="🌿", default=True)
+def _inject_css(t: dict) -> None:
+    dark_extra = ""
+    if t["dark"]:
+        dark_extra = f"""
+.stApp, .stApp p, .stApp span, .stApp li,
+[data-testid="stMarkdownContainer"],
+[data-testid="stChatMessageContent"] {{ color: {t['text']} !important; }}
+textarea, [data-testid="stTextArea"] textarea {{
+    background: {t['input_bg']} !important; color: {t['text']} !important;
+}}
+[data-testid="stTextInput"] input {{
+    background: {t['input_bg']} !important; color: {t['text']} !important;
+    border-color: {t['input_border']} !important;
+}}
+[data-testid="stRadio"] label {{ color: {t['text']} !important; }}
+.stCaption {{ color: {t['text_muted']} !important; }}
+"""
+    st.markdown(f"""
+<style>
+#MainMenu, header[data-testid="stHeader"],
+.stDeployButton, [data-testid="stToolbar"],
+[data-testid="stDecoration"], [data-testid="stStatusWidget"]
+{{ display:none !important; visibility:hidden !important; }}
+header[data-testid="stHeader"] {{ height:0 !important; }}
 
-# Admin 서브페이지들 (admin/pages/ 폴더 그대로 재사용)
-admin_home   = st.Page("admin/app.py",                         title="운영 허브",   icon="🏠")
-admin_lib    = st.Page("admin/pages/1_📚_Library.py",           title="자료실",      icon="📚")
-admin_upload = st.Page("admin/pages/2_📥_Upload.py",            title="자료 업로드", icon="📥")
-admin_search = st.Page("admin/pages/3_🔎_Search.py",            title="검색 테스트", icon="🔎")
-admin_status = st.Page("admin/pages/4_📊_Status.py",            title="상태 모니터", icon="📊")
-admin_conv   = st.Page("admin/pages/5_💭_대화기록.py",           title="대화 기록",   icon="💭")
-admin_prompt = st.Page("admin/pages/6_📝_프롬프트.py",           title="프롬프트",    icon="📝")
-admin_cat    = st.Page("admin/pages/7_🏷_분류관리.py",           title="분류 관리",   icon="🏷")
-admin_people = st.Page("admin/pages/9_👥_사람.py",               title="사람",        icon="👥")
-admin_config = st.Page("admin/pages/10_⚙️_설정.py",              title="설정",        icon="⚙️")
-admin_gloss  = st.Page("admin/pages/14_📚_용어집.py",            title="용어집",      icon="📖")
-admin_flow   = st.Page("admin/pages/15_📥_자료흐름.py",          title="자료 흐름",   icon="🔄")
+.stApp {{ background:{t['app_bg']} !important; transition:background 0.3s; }}
+[data-testid="stSidebar"] {{
+    background:{t['sidebar_bg']} !important;
+    border-right:1px solid {t['divider']} !important;
+    transition:background 0.3s;
+}}
+html, body, [class*="css"] {{
+    font-family: 'Google Sans', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif;
+}}
+.block-container {{
+    padding-top:0 !important; padding-bottom:0.5rem !important; max-width:780px;
+}}
+[data-testid="stSidebarContent"] {{ padding:1rem 0.75rem 1.5rem; }}
+
+/* ── 사이드바 버튼 공통 ── */
+[data-testid="stSidebar"] .stButton button {{
+    background:transparent !important; border:none !important;
+    border-radius:8px !important; color:{t['sidebar_text']} !important;
+    font-size:0.87rem !important; padding:0.45rem 0.75rem !important;
+    width:100% !important; text-align:left !important;
+    justify-content:flex-start !important; white-space:nowrap !important;
+    overflow:hidden !important; text-overflow:ellipsis !important;
+    margin-bottom:1px !important; transition:background 0.15s !important;
+}}
+[data-testid="stSidebar"] .stButton button:hover {{
+    background:{t['sidebar_hover']} !important;
+}}
+
+/* ── 새 채팅 버튼 ── */
+.new-chat-btn button {{
+    background:transparent !important;
+    border:1px solid {t['divider']} !important;
+    border-radius:24px !important;
+    color:{t['sidebar_text']} !important;
+    font-size:0.9rem !important; font-weight:500 !important;
+    padding:0.5rem 1rem !important; width:100% !important;
+    text-align:left !important; justify-content:flex-start !important;
+    gap:8px !important; transition:background 0.15s !important;
+    margin-bottom:0.5rem !important;
+}}
+.new-chat-btn button:hover {{ background:{t['sidebar_hover']} !important; }}
+
+/* ── 관리자 진입 버튼 (사이드바 내 강조) ── */
+.admin-entry-btn button {{
+    background:transparent !important;
+    border:1px solid {t['divider']} !important;
+    border-radius:8px !important;
+    color:{t['text_muted']} !important;
+    font-size:0.82rem !important;
+    padding:0.4rem 0.75rem !important;
+    width:100% !important; text-align:center !important;
+    justify-content:center !important;
+    transition:all 0.15s !important;
+}}
+.admin-entry-btn button:hover {{
+    background:{t['sidebar_hover']} !important;
+    color:{t['text']} !important;
+    border-color:{t['accent']} !important;
+}}
+
+/* ── 상단 바 ── */
+.topbar {{
+    display:flex; justify-content:flex-end; align-items:center;
+    padding:0.5rem 0 0.3rem 0; gap:4px;
+}}
+.topbar .stButton button {{
+    height:32px !important; padding:0 0.7rem !important;
+    border-radius:18px !important; border:1px solid {t['divider']} !important;
+    background:transparent !important; color:{t['text_sub']} !important;
+    font-size:0.9rem !important; line-height:1 !important;
+    white-space:nowrap !important;
+}}
+.topbar .stButton button:hover {{
+    background:{t['sidebar_bg']} !important; color:{t['text']} !important;
+}}
+.topbar [data-testid="stPopover"] > button {{
+    height:32px !important; padding:0 0.9rem !important;
+    border-radius:18px !important; border:1px solid {t['divider']} !important;
+    background:transparent !important; color:{t['text_sub']} !important;
+    font-size:0.83rem !important; font-weight:500 !important;
+    white-space:nowrap !important;
+}}
+.topbar [data-testid="stPopover"] > button:hover {{
+    background:{t['sidebar_bg']} !important; color:{t['text']} !important;
+}}
+
+/* ── 그리팅 ── */
+.gemini-greeting {{ text-align:center; padding:3rem 1rem 2rem; }}
+.gemini-greeting .icon {{ font-size:3rem; margin-bottom:0.5rem; }}
+.gemini-greeting h2 {{
+    font-size:2rem !important; font-weight:400 !important;
+    color:{t['text']} !important; margin:0 0 0.4rem !important;
+    letter-spacing:-0.01em;
+    background:linear-gradient(135deg,{t['accent']} 0%,#2E7D32 50%,#558B2F 100%);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    background-clip:text;
+}}
+.gemini-greeting .sub {{ font-size:1rem; color:{t['text_sub']}; margin:0; }}
+
+/* ── 채팅 메시지 ── */
+.stChatMessage {{ font-size:1.0rem; line-height:1.8; }}
+[data-testid="stChatMessageContent"] p {{ margin-bottom:0.6em; }}
+[data-testid="stChatMessageAvatarAssistant"] {{
+    background:{t['accent']} !important; border-radius:50% !important;
+}}
+
+/* ── 채팅 입력 ── */
+[data-testid="stChatInput"] {{
+    border-radius:24px !important; background:{t['input_bg']} !important;
+    border:1px solid {t['input_border']} !important;
+    padding:0.2rem 0.5rem !important;
+    box-shadow:0 1px 3px rgba(0,0,0,0.08) !important;
+    transition:border-color 0.2s, box-shadow 0.2s !important;
+}}
+[data-testid="stChatInput"]:focus-within {{
+    border-color:{t['input_focus']} !important;
+    box-shadow:0 1px 6px rgba(26,115,64,0.2) !important;
+}}
+[data-testid="stChatInputTextArea"] {{
+    font-size:1rem !important; background:transparent !important;
+    color:{t['text']} !important;
+}}
+{dark_extra}
+</style>
+""", unsafe_allow_html=True)
 
 
-def _is_admin() -> bool:
-    """관리자 모드 활성화 여부."""
-    if not APP_PASSWORD:
-        return st.session_state.admin_mode
-    return st.session_state.admin_mode and st.session_state.admin_auth_ok
+_inject_css(_T)
 
 
-def _admin_login_ui():
-    """관리자 비밀번호 입력 UI."""
-    st.markdown("### 관리자 인증")
-    pw = st.text_input("비밀번호", type="password", key="admin_pw_input",
-                       placeholder="관리자 비밀번호를 입력하세요")
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        if st.button("확인", type="primary", key="admin_pw_btn"):
+# ══════════════════════════════════════════════════════════════════════════════
+# 헬퍼 함수
+# ══════════════════════════════════════════════════════════════════════════════
+def _fetch_quota(sub_id: str) -> dict | None:
+    try:
+        with httpx.Client(timeout=4) as c:
+            r = c.get(f"{API_BASE}/subscribers/me/quota", params={"user_id": sub_id})
+        return r.json() if r.status_code < 400 else None
+    except Exception:
+        return None
+
+
+def _send_feedback(iid: str, val: int) -> bool:
+    try:
+        with httpx.Client(timeout=15) as c:
+            r = c.post(f"{API_BASE}/feedback",
+                       json={"interaction_id": iid, "value": val,
+                             "user_id": st.session_state.subscriber_id})
+        return r.status_code < 400
+    except Exception:
+        return False
+
+
+def _save_history():
+    if not st.session_state.msgs:
+        return
+    first = next((m["content"] for m in st.session_state.msgs if m["role"] == "user"), "")
+    if not first:
+        return
+    st.session_state.conversations.insert(0, {
+        "id":         uuid.uuid4().hex,
+        "title":      first[:35] + ("…" if len(first) > 35 else ""),
+        "messages":   list(st.session_state.msgs),
+        "created_at": datetime.now().strftime("%m/%d %H:%M"),
+    })
+
+
+def _new_conv():
+    _save_history()
+    st.session_state.msgs = []
+    st.rerun()
+
+
+def _load_conv(conv: dict):
+    _save_history()
+    st.session_state.msgs = list(conv["messages"])
+    st.session_state.conversations = [c for c in st.session_state.conversations
+                                       if c["id"] != conv["id"]]
+    st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 모드 분기
+# ══════════════════════════════════════════════════════════════════════════════
+_mode = st.session_state.mode  # "chat" | "admin_login" | "admin"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ① ADMIN 모드 — 기존 admin/app.py 페이지들을 st.navigation 으로 통합
+# ══════════════════════════════════════════════════════════════════════════════
+if _mode == "admin":
+    # --- Admin 페이지 정의 ---
+    admin_pages = {
+        "운영": [
+            st.Page("admin/app.py", title="운영 허브", icon="🏠"),
+        ],
+        "콘텐츠": [
+            st.Page("admin/pages/1_📚_Library.py",   title="자료실",      icon="📚"),
+            st.Page("admin/pages/2_📥_Upload.py",    title="자료 업로드", icon="📥"),
+            st.Page("admin/pages/3_🔎_Search.py",    title="검색 테스트", icon="🔎"),
+            st.Page("admin/pages/14_📚_용어집.py",   title="용어집",      icon="📖"),
+            st.Page("admin/pages/15_📥_자료흐름.py", title="자료 흐름",   icon="🔄"),
+        ],
+        "모니터링": [
+            st.Page("admin/pages/4_📊_Status.py",   title="상태 모니터", icon="📊"),
+            st.Page("admin/pages/5_💭_대화기록.py", title="대화 기록",   icon="💭"),
+        ],
+        "시스템": [
+            st.Page("admin/pages/6_📝_프롬프트.py", title="프롬프트",    icon="📝"),
+            st.Page("admin/pages/7_🏷_분류관리.py", title="분류 관리",   icon="🏷"),
+            st.Page("admin/pages/9_👥_사람.py",     title="사람",        icon="👥"),
+            st.Page("admin/pages/10_⚙️_설정.py",    title="설정",        icon="⚙️"),
+        ],
+    }
+
+    # --- Admin 사이드바 하단 버튼 ---
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown(
+            f"<div style='font-size:0.75rem;color:{_T['text_muted']};padding:0.25rem 0;'>"
+            f"<a href='{QDRANT_URL}/dashboard' target='_blank' "
+            f"style='text-decoration:none;color:{_T['text_muted']};'>⚡ Qdrant 대시보드 열기</a></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("💬 채팅으로 돌아가기", key="back_to_chat", use_container_width=True,
+                     help="사용자 채팅 화면으로 돌아가기"):
+            st.session_state.mode    = "chat"
+            st.session_state.auth_ok = False
+            st.rerun()
+
+    pg = st.navigation(admin_pages)
+    pg.run()
+    st.stop()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ② ADMIN 로그인 화면
+# ══════════════════════════════════════════════════════════════════════════════
+if _mode == "admin_login":
+    with st.sidebar:
+        if st.button("← 채팅으로", key="cancel_login", use_container_width=True):
+            st.session_state.mode = "chat"
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 🔒 관리자 인증")
+    st.caption("운영 콘솔에 접근하려면 비밀번호를 입력하세요.")
+    pw = st.text_input("비밀번호", type="password", key="admin_pw",
+                       placeholder="관리자 비밀번호 입력")
+    col_ok, col_cancel = st.columns([1, 1])
+    with col_ok:
+        if st.button("✅ 확인", type="primary", use_container_width=True, key="pw_ok"):
             if pw == APP_PASSWORD:
-                st.session_state.admin_auth_ok = True
-                st.session_state.auth_ok = True   # admin/app.py 의 gate() 호환
+                st.session_state.mode    = "admin"
+                st.session_state.auth_ok = True
                 st.rerun()
             else:
                 st.error("비밀번호가 올바르지 않습니다.")
-    with col2:
-        if st.button("취소", key="admin_cancel_btn"):
-            st.session_state.admin_mode = False
+    with col_cancel:
+        if st.button("취소", use_container_width=True, key="pw_cancel"):
+            st.session_state.mode = "chat"
             st.rerun()
+    st.stop()
 
 
-# ── 사이드바 — 관리자 토글 버튼 ──────────────────────────────────────────────
-# (각 페이지 앱이 자체 사이드바를 갖지만,
-#  st.navigation 사이드바 최하단에 모드 전환 버튼을 삽입)
+# ══════════════════════════════════════════════════════════════════════════════
+# ③ 채팅 모드 (기본)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 사이드바 ────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown(
-        "<div style='position:fixed; bottom:1.5rem; left:0; width:inherit; padding:0 1rem;'>",
-        unsafe_allow_html=True,
-    )
-    if _is_admin():
-        if st.button("👤 사용자 모드로", use_container_width=True, key="exit_admin_btn",
-                     help="채팅 화면으로 돌아가기"):
-            st.session_state.admin_mode = False
-            st.session_state.admin_auth_ok = False
-            st.session_state.auth_ok = False
-            st.rerun()
-        # Qdrant 대시보드 링크
+    st.markdown("### 🌿")
+
+    # 새 대화 버튼
+    st.markdown('<div class="new-chat-btn">', unsafe_allow_html=True)
+    if st.button("✏️  새 대화", key="btn_new", use_container_width=True):
+        _new_conv()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # 대화 기록
+    convs = st.session_state.conversations
+    if convs:
         st.markdown(
-            f"<div style='margin-top:0.5rem;text-align:center;"
-            f"font-size:0.78rem;'>"
-            f"<a href='{QDRANT_URL}/dashboard' target='_blank' "
-            f"style='text-decoration:none;color:#888;'>⚡ Qdrant 대시보드</a></div>",
+            f"<div style='font-size:0.75rem;color:{_T['text_muted']};"
+            f"padding:0.5rem 0.25rem 0.25rem;font-weight:500;'>최근 대화</div>",
             unsafe_allow_html=True,
         )
-    else:
-        if st.button("🔧 관리자 모드", use_container_width=True, key="enter_admin_btn",
-                     help="운영 콘솔 열기"):
-            st.session_state.admin_mode = True
-            # 비밀번호 없으면 바로 진입
-            if not APP_PASSWORD:
-                st.session_state.admin_auth_ok = True
-                st.session_state.auth_ok = True   # admin/app.py gate() 호환
-            st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+        for conv in convs[:30]:
+            if st.button(conv["title"], key=f"h_{conv['id']}", use_container_width=True):
+                _load_conv(conv)
 
+    # 대화 요약 (4개 이상 메시지 시)
+    if len(st.session_state.msgs) >= 4:
+        st.markdown("---")
+        if st.button("📋 대화 요약", key="btn_sum", use_container_width=True):
+            with st.spinner("요약 중…"):
+                excerpt = "\n".join(
+                    f"{'나' if m['role']=='user' else 'AI'}: {m['content'][:120]}"
+                    for m in st.session_state.msgs[-8:]
+                )
+                try:
+                    with httpx.Client(timeout=60) as c:
+                        r = c.post(f"{API_BASE}/chat", json={
+                            "query": f"다음 대화를 2~3줄로 핵심만 요약해 주세요:\n\n{excerpt}",
+                            "history": [], "user_id": st.session_state.subscriber_id,
+                        })
+                    st.info(r.json().get("answer", "요약 실패") if r.status_code < 400 else "요약 실패")
+                except Exception:
+                    st.warning("요약 중 오류가 발생했어요.")
 
-# ── 라우팅 ────────────────────────────────────────────────────────────────────
-if not st.session_state.admin_mode:
-    # 사용자 모드 — 채팅 페이지만
-    pg = st.navigation([chat_page], position="hidden")
-    pg.run()
+    # 쿼터 표시
+    st.markdown("---")
+    quota = _fetch_quota(st.session_state.subscriber_id)
+    if quota and not quota.get("unlimited"):
+        tier = quota.get("subscription_tier", "guest")
+        if tier == "guest":
+            approx = max(0, quota.get("tokens_daily", 0) // 2000)
+            if approx > 0:
+                st.caption(f"오늘 남은 응답: **{approx}건**")
+            else:
+                st.warning("오늘 무료 응답이 모두 사용되었어요.")
+        else:
+            st.caption(f"월간 잔여: **{quota.get('tokens_monthly',0):,}** 토큰")
 
-elif APP_PASSWORD and not st.session_state.admin_auth_ok:
-    # 비밀번호 입력 대기
-    st.set_page_config(
-        page_title="관리자 인증",
-        page_icon="🔒",
-        layout="centered",
+    # 하단 구분 — 관리자 진입 + 긴급 전화
+    st.markdown(
+        f"<div style='margin-top:auto;padding-top:1.5rem;"
+        f"font-size:0.72rem;color:{_T['text_muted']};line-height:1.7'>"
+        f"⚠️ 응급: 한국생명의전화 1588-9191</div>",
+        unsafe_allow_html=True,
     )
-    _admin_login_ui()
+    st.markdown('<div class="admin-entry-btn">', unsafe_allow_html=True)
+    if st.button("⚙️ 관리자", key="enter_admin",
+                 help="운영 콘솔 열기 (비밀번호 필요)"):
+        if APP_PASSWORD:
+            st.session_state.mode = "admin_login"
+        else:
+            st.session_state.mode    = "admin"
+            st.session_state.auth_ok = True
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
-else:
-    # 관리자 모드 — Admin 페이지 네비게이션
-    pg = st.navigation(
-        {
-            "운영": [admin_home],
-            "콘텐츠": [admin_lib, admin_upload, admin_search, admin_gloss, admin_flow],
-            "모니터링": [admin_status, admin_conv],
-            "시스템": [admin_prompt, admin_cat, admin_people, admin_config],
-        }
-    )
-    pg.run()
+
+# ── 상단 바 (테마 + 스트리밍 + 로그인) ──────────────────────────────────────
+_logged_in = bool(st.session_state.auth_token)
+_uname     = st.session_state.get("user_display_name") or ""
+_is_dark   = (_TK == "dark")
+_streaming = st.session_state.streaming_mode
+
+st.markdown('<div class="topbar">', unsafe_allow_html=True)
+_, c_stream, c_theme, c_login = st.columns([4.5, 1.4, 0.7, 1.8])
+
+with c_stream:
+    _stream_label = "🟢 스트리밍" if _streaming else "⚪ 스트리밍"
+    if st.button(_stream_label, key="btn_stream",
+                 help="스트리밍 끄기" if _streaming else "스트리밍 켜기"):
+        st.session_state.streaming_mode = not _streaming
+        st.rerun()
+
+with c_theme:
+    if st.button("☀️" if _is_dark else "🌙", key="btn_theme",
+                 help="라이트 모드" if _is_dark else "다크 모드"):
+        st.session_state.theme = "light" if _is_dark else "dark"
+        st.rerun()
+
+with c_login:
+    _plabel = f"👤 {_uname}" if (_logged_in and _uname) else "👤 로그인"
+    with st.popover(_plabel, use_container_width=True):
+        if not _logged_in:
+            _t = st.radio("", ["로그인", "가입하기"], horizontal=True,
+                          key="auth_tab", label_visibility="collapsed")
+            if _t == "로그인":
+                _lem = st.text_input("이메일", key="li_em", placeholder="이메일",
+                                     label_visibility="collapsed")
+                _lpw = st.text_input("비밀번호", key="li_pw", type="password",
+                                     placeholder="비밀번호", label_visibility="collapsed")
+                if st.button("로그인", key="btn_login", use_container_width=True):
+                    if _lem and _lpw:
+                        try:
+                            with httpx.Client(timeout=15) as c:
+                                r = c.post(f"{API_BASE}/auth/login",
+                                           json={"email": _lem, "password": _lpw})
+                            if r.status_code < 400:
+                                d = r.json()
+                                st.session_state.auth_token        = d["token"]
+                                st.session_state.subscriber_id     = d["sub_id"]
+                                st.session_state.user_display_name = _lem.split("@")[0]
+                                st.rerun()
+                            else:
+                                st.error("이메일 또는 비밀번호가 올바르지 않습니다.")
+                        except Exception as e:
+                            st.error(f"오류: {e}")
+            else:
+                _em = st.text_input("이메일", key="su_em", placeholder="이메일",
+                                    label_visibility="collapsed")
+                _pw = st.text_input("비밀번호", key="su_pw", type="password",
+                                    placeholder="비밀번호 (6자+)", label_visibility="collapsed")
+                _nm = st.text_input("이름", key="su_nm", placeholder="이름 (선택)",
+                                    label_visibility="collapsed")
+                if st.button("✨ 가입하기", key="btn_signup", use_container_width=True):
+                    if _em and _pw:
+                        try:
+                            with httpx.Client(timeout=15) as c:
+                                r = c.post(f"{API_BASE}/auth/signup", json={
+                                    "email": _em, "password": _pw,
+                                    "display_name": _nm or None,
+                                    "guest_sub_id": st.session_state.subscriber_id,
+                                })
+                            if r.status_code < 400:
+                                d = r.json()
+                                st.session_state.auth_token        = d["token"]
+                                st.session_state.subscriber_id     = d["sub_id"]
+                                st.session_state.user_display_name = _nm or _em.split("@")[0]
+                                st.success(f"🎁 {d.get('tokens_bonus',0):,}토큰 지급!")
+                                st.rerun()
+                            else:
+                                st.error(r.json().get("detail", "가입 실패"))
+                        except Exception as e:
+                            st.error(f"오류: {e}")
+                    else:
+                        st.warning("이메일과 비밀번호를 입력해 주세요.")
+        else:
+            st.markdown(f"**{_uname}** 님")
+            st.divider()
+            if st.button("로그아웃", key="btn_logout", use_container_width=True):
+                st.session_state.auth_token        = None
+                st.session_state.user_display_name = None
+                st.rerun()
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ── 빈 화면 그리팅 ──────────────────────────────────────────────────────────
+has_msgs = bool(st.session_state.msgs)
+
+if not has_msgs:
+    _hour   = datetime.now().hour
+    _greet  = ("좋은 아침입니다" if _hour < 12
+               else "좋은 오후입니다" if _hour < 18
+               else "좋은 저녁입니다")
+    st.markdown(f"""
+<div class="gemini-greeting">
+    <div class="icon">🌿</div>
+    <h2>무엇을 도와드릴까요?</h2>
+    <p class="sub">{_greet}. 복음과 말씀에 대해 무엇이든 편하게 물어보세요.</p>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ── 대화 메시지 표시 ─────────────────────────────────────────────────────────
+for idx, m in enumerate(st.session_state.msgs):
+    _av = "🌿" if m["role"] == "assistant" else "🙋"
+    with st.chat_message(m["role"], avatar=_av):
+        st.markdown(m["content"])
+        iid = m.get("interaction_id")
+        if m["role"] == "assistant" and iid and m.get("feedback") is None:
+            c1, c2, _ = st.columns([1, 1, 7])
+            with c1:
+                if st.button("👍", key=f"up_{idx}", help="도움됐어요"):
+                    if _send_feedback(iid, 1):
+                        m["feedback"] = 1
+                        st.rerun()
+            with c2:
+                if st.button("👎", key=f"dn_{idx}", help="아쉬워요"):
+                    if _send_feedback(iid, -1):
+                        m["feedback"] = -1
+                        st.rerun()
+
+
+# ── 채팅 입력 ────────────────────────────────────────────────────────────────
+_ph     = "무엇이든 물어보세요…" if not has_msgs else "메시지 입력…"
+prompt  = st.chat_input(_ph)
+
+if prompt:
+    st.session_state.msgs.append({"role": "user", "content": prompt})
+    with st.chat_message("user", avatar="🙋"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant", avatar="🌿"):
+        full_text = ""
+        sources: list = []
+        interaction_id = None
+        ph = st.empty()
+
+        if st.session_state.streaming_mode:
+            # 스트리밍 모드
+            try:
+                with httpx.stream(
+                    "POST", f"{API_BASE}/chat/stream",
+                    json={
+                        "query": prompt,
+                        "history": [
+                            {"role": m["role"], "content": m["content"]}
+                            for m in st.session_state.msgs[:-1]
+                        ],
+                        "user_id": st.session_state.subscriber_id,
+                    },
+                    timeout=180,
+                ) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_text():
+                        if chunk.strip():
+                            full_text += chunk
+                            ph.markdown(full_text + "▌")
+                    ph.markdown(full_text)
+            except Exception as e:
+                st.error(f"스트리밍 중 오류: {e}")
+                full_text = "죄송합니다. 스트리밍 응답을 가져오지 못했어요."
+                ph.markdown(full_text)
+        else:
+            # 일반 모드
+            with st.spinner(""):
+                try:
+                    with httpx.Client(timeout=180) as c:
+                        r = c.post(f"{API_BASE}/chat", json={
+                            "query": prompt,
+                            "history": [
+                                {"role": m["role"], "content": m["content"]}
+                                for m in st.session_state.msgs[:-1]
+                            ],
+                            "user_id": st.session_state.subscriber_id,
+                        })
+                    if r.status_code < 400:
+                        data           = r.json()
+                        full_text      = data.get("answer", "")
+                        sources        = data.get("sources", [])
+                        interaction_id = data.get("interaction_id")
+                        ph.markdown(full_text)
+                    elif r.status_code == 429:
+                        st.warning("오늘 무료 응답이 모두 사용되었어요. "
+                                   "오른쪽 상단 👤 에서 가입하시면 월 10만 토큰을 드려요. 🎁")
+                        full_text = ""
+                    else:
+                        st.error("죄송합니다. 잠시 후 다시 시도해 주세요.")
+                        full_text = ""
+                except Exception:
+                    st.error("연결에 문제가 있어요. 잠시 후 다시 시도해 주세요.")
+                    full_text = ""
+
+    if full_text:
+        st.session_state.msgs.append({
+            "role": "assistant", "content": full_text,
+            "sources": sources, "interaction_id": interaction_id, "feedback": None,
+        })
+        st.rerun()

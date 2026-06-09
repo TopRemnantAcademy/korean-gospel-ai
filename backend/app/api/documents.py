@@ -16,11 +16,15 @@ import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
-from pydantic import BaseModel
 
 from ..config import settings
 from ..db import get_session
 from ..models.orm import DocVersionState
+from ..models.schemas import (
+    DraftMetaIn, DocMetaIn, BodyPatchIn,
+    DocumentSummary, VersionDetail,
+    CleanupIn, BulkActionIn,
+)
 from ..services import (
     audit_service, document_service, publish_service, source_service, dedup_service,
 )
@@ -38,60 +42,7 @@ def _check_admin(authorization: Optional[str]):
     if token != settings.admin_api_key:
         raise HTTPException(status_code=403, detail="invalid admin token")
 
-
-# ---------- Schemas ----------
-class DraftMetaIn(BaseModel):
-    title: Optional[str] = None
-    summary: Optional[str] = None
-    topic_tags: Optional[list[str]] = None
-    scripture_refs: Optional[list[str]] = None
-    checklist: Optional[dict] = None
-
-
-class DocMetaIn(BaseModel):
-    """document 레벨 메타 (버전 독립) — speaker / series / doc_type."""
-    speaker: Optional[str] = None
-    series: Optional[str] = None
-    doc_type: Optional[str] = None
-
-
-class BodyPatchIn(BaseModel):
-    body: str
-
-
-class DocumentSummary(BaseModel):
-    doc_id: str
-    doc_key: str
-    doc_type: str
-    title: str
-    series: Optional[str]
-    speaker: Optional[str]
-    is_canonical: bool
-    latest_version: int
-    latest_state: str
-    published_version: Optional[int]
-    updated_at: str
-
-
-class VersionDetail(BaseModel):
-    version_id: str
-    doc_id: str
-    version_number: int
-    state: str
-    title: str
-    summary: Optional[str]
-    topic_tags: list[str]
-    scripture_refs: list[str]
-    body_patch: Optional[str]
-    jsonl_path: Optional[str] = None
-    extracted_text_preview: str
-    extraction_quality_score: int
-    extraction_warnings: dict
-    checklist: dict
-    validation_report: dict
-    created_at: str
-    published_at: Optional[str]
-    dup_hits: list[dict] = []
+    # Schemas are now in models/schemas.py
 
 
 # ---------- helpers (라우트보다 먼저 정의 — inbox 라우트에서 사용) ----------
@@ -788,10 +739,7 @@ async def publish_version_async(
 # ---------- 8) 용어 추출 (구 Cleanup endpoint — 하위 호환 유지) ----------
 # 발행 시 자동 실행되므로 수동 호출은 거의 불필요.
 # 텍스트 수정 없음 — 용어 목록만 반환.
-class CleanupIn(BaseModel):
-    stages: list[int] = [5]   # 용어 추출만 (다른 값 무시)
-    dry_run: bool = False
-
+# CleanupIn → models/schemas.py 로 이전됨
 
 @router.post("/{doc_id}/versions/{version_id}/cleanup")
 async def run_cleanup_endpoint(
@@ -892,10 +840,7 @@ def get_audit(doc_id: str, authorization: Optional[str] = Header(default=None)):
 
 
 # ---------- Bulk ----------
-class BulkActionIn(BaseModel):
-    doc_ids: list[str]
-    action: str  # "publish" | "archive"
-
+# BulkActionIn → models/schemas.py 로 이전됨
 
 @router.post("/bulk-action")
 def bulk_action(payload: BulkActionIn, authorization: Optional[str] = Header(default=None)):

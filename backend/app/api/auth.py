@@ -22,11 +22,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel, EmailStr
+from pydantic import EmailStr
 
 from ..config import settings
 from ..db import get_session
 from ..models.orm import Subscriber
+from ..models.schemas import SignupReq, LoginReq, AuthResponse
 from ..services.token_service import grant_signup_bonus_sync, get_quota_status
 from ..services.audit_service import log as audit_log
 
@@ -78,31 +79,8 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> str
     return sub_id
 
 
-# ── 요청/응답 모델 ─────────────────────────────────────────────────────────
-class SignupReq(BaseModel):
-    email: str
-    password: str
-    display_name: Optional[str] = None
-    guest_sub_id: Optional[str] = None   # 기존 guest 대화 승계
-
-
-class LoginReq(BaseModel):
-    email: str
-    password: str
-
-
-class AuthResponse(BaseModel):
-    sub_id: str
-    token: str
-    subscription_tier: str
-    tokens_bonus: int
-    tokens_monthly: int
-    tokens_daily: int
-    display_name: Optional[str]
-    is_new: bool
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────
+# 요청/응답 모델은 models/schemas.py 로 이전됨 (SignupReq, LoginReq, AuthResponse)
 
 @router.post("/signup", response_model=AuthResponse)
 def signup(req: SignupReq):
