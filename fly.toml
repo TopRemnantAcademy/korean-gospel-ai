@@ -1,25 +1,29 @@
-app = "gospel-ai-backend"
-primary_region = "nrt" # 도쿄 리전 (한국 지연시간 최적화)
+# fly.toml app configuration file generated for korean-gospel-ai on 2026-06-11T07:18:06Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'korean-gospel-ai'
+primary_region = 'ams'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  PORT = "8000"
-  PYTHONUNBUFFERED = "1"
-  # API 운영 시 256MB 메모리를 아끼기 위해 기본 임베더를 외부 hf_inference로 강제
-  EMBEDDER = "hf_inference"
-  QDRANT_SPARSE_ENABLED = "false" # fastembed 로딩(OOM 위험) 차단
+  EMBEDDER = 'hf_inference'
+  PORT = '8000'
+  PYTHONUNBUFFERED = '1'
+  QDRANT_SPARSE_ENABLED = 'false'
 
 [http_service]
-  internal_port = 8000
+  internal_port = 8080
   force_https = true
-  auto_stop_machines = true  # 사용하지 않을 때 서버 정지 (무료 한도 절약)
-  auto_start_machines = true # 요청 유입 시 즉시 부팅
-  min_machines_running = 0   # 0 = 상시 구동 대신 완전 온디맨드 무료 적용
-  processes = ["app"]
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
 
 [[vm]]
-  cpu_kind = "shared"
+  cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 256            # 256MB 메모리 스펙 (무료)
+  memory_mb = 256
