@@ -14,6 +14,7 @@ embedded/memory 모드는 자동으로 dense-only fallback.
 from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
+from threading import Lock
 from typing import Optional, Sequence
 import uuid
 
@@ -34,9 +35,12 @@ class RetrievedPoint:
 _BM42_MODEL = "Qdrant/bm42-all-minilm-l6-v2-attentions"
 
 
-def _make_client() -> tuple[QdrantClient, bool]:
+_client_cache: dict[str, tuple[QdrantClient, bool]] = {}
+_client_lock = Lock()
+
+
+def _build_client(url: str) -> tuple[QdrantClient, bool]:
     """returns (client, is_server_mode). server mode일 때만 sparse 지원."""
-    url = (settings.qdrant_url or "").strip()
     if url.startswith("local:"):
         path = url.split(":", 1)[1] or "./.qdrant_local"
         return QdrantClient(path=path), False
@@ -44,6 +48,26 @@ def _make_client() -> tuple[QdrantClient, bool]:
         return QdrantClient(location=":memory:"), False
     # server mode
     return QdrantClient(url=url, api_key=settings.qdrant_api_key or None, prefer_grpc=False), True
+
+
+def _make_client() -> tuple[QdrantClient, bool]:
+    """프로세스당 URL별로 단일 QdrantClient 재사용.
+
+    embedded(local) 모드는 스토리지 폴더에 파일 락을 잡기 때문에 같은 경로로
+    두 번째 클라이언트를 열면 "already accessed by another instance" 오류가 난다.
+    memory 모드도 인스턴스마다 별도 DB라 캐시가 정확성에 필요하다.
+    """
+    url = (settings.qdrant_url or "").strip()
+    cached = _client_cache.get(url)
+    if cached is not None:
+        return cached
+    with _client_lock:
+        cached = _client_cache.get(url)
+        if cached is not None:
+            return cached
+        client = _build_client(url)
+        _client_cache[url] = client
+        return client
 
 
 @lru_cache(maxsize=1)
