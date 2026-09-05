@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(venv\\\\Scripts\\\\python.exe -c \"import ast; [print\\(f'{f}: OK'\\) for f in ['backend/app/models/schemas.py','backend/app/prompts/classifier.py','backend/app/services/classifier.py','backend/app/api/chat.py'] if not ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\)]\")",
-      "Bash(venvScriptspython.exe -c ' *)"
-    ]
-  }
-}
