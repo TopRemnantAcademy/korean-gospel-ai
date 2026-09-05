@@ -85,39 +85,40 @@ def check_on_upload(
     # 3) 본문 앞부분 유사 (간단 substring) -> 유사 자료
     if extracted_head and len(extracted_head) >= 100:
         head_key = extracted_head[:200]
-        # SourceArtifact에서 전체 extracted_text를 로드하지 않고, 앞부분 1000자만 SELECT
+        # 최적화: SQL LIKE로 사전 필터링 → Python for-loop 대상 대폭 감소
+        # head_key의 앞 80자를 LIKE 패턴으로 사용 (SQLite는 기본 인덱스 없지만 full scan보다 빠름)
+        search_pattern = f"%{head_key[:80]}%"
         from sqlalchemy import func
         rows = (
             session.query(
                 SourceArtifact.artifact_id,
-                SourceArtifact.content_hash,
-                func.substr(SourceArtifact.extracted_text, 1, 1000).label("text_head")
+                func.substr(SourceArtifact.extracted_text, 1, 1000).label("text_head"),
+                DocumentVersion.doc_id,
+                DocumentVersion.title,
+                Document.doc_key,
             )
+            .outerjoin(DocumentVersion, DocumentVersion.artifact_id == SourceArtifact.artifact_id)
+            .outerjoin(Document, DocumentVersion.doc_id == Document.doc_id)
             .filter(SourceArtifact.content_hash != content_hash)
+            .filter(func.substr(SourceArtifact.extracted_text, 1, 1000).like(
+                search_pattern, escape="\\"  # SQL LIKE 사전 필터링
+            ))
+            .limit(20)  # 최대 20건만 확인 (중복은 많아야 소수)
             .all()
         )
-        for artifact_id, art_content_hash, text_head in rows:
+        seen_doc_ids: set[str] = {h.doc_id for h in hits if h.doc_id}
+        for artifact_id, text_head, doc_id, title, doc_key in rows:
             ex = text_head or ""
             if not ex:
                 continue
             if head_key[:100] in ex:
-                # N+1 방지를 위해 Document와 join해서 쿼리
-                v = (
-                    session.query(
-                        DocumentVersion.doc_id,
-                        DocumentVersion.title,
-                        Document.doc_key
-                    )
-                    .join(Document, DocumentVersion.doc_id == Document.doc_id)
-                    .filter(DocumentVersion.artifact_id == artifact_id)
-                    .first()
-                )
-                if v and not any(h.doc_id == v.doc_id for h in hits):
+                if doc_id and doc_id not in seen_doc_ids:
+                    seen_doc_ids.add(doc_id)
                     hits.append(DupHit(
                         kind="similar",
-                        doc_id=v.doc_id,
-                        doc_key=v.doc_key,
-                        title=v.title,
+                        doc_id=doc_id,
+                        doc_key=doc_key,
+                        title=title,
                         reason="본문의 앞부분이 비슷합니다. 같은 자료의 다른 형식일 수 있어요.",
                     ))
 

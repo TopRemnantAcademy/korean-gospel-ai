@@ -7,12 +7,11 @@ GET  /drafts                  운영자 전체 임시저장 목록
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 
-from ..config import settings
 from ..db import get_session
 from ..models.orm import DocumentDraft, DocumentVersion
 from ..models.schemas import DraftIn
@@ -20,11 +19,7 @@ from ..models.schemas import DraftIn
 router = APIRouter(prefix="/drafts", tags=["drafts"])
 
 
-def _check_admin(authorization: Optional[str]):
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(403, "missing admin token")
-    if authorization.split(" ", 1)[1].strip() != settings.admin_api_key:
-        raise HTTPException(403, "invalid admin token")
+from .auth import check_admin as _check_admin
 
 
 # DraftIn → models/schemas.py 로 이전됨
@@ -46,7 +41,7 @@ def save_draft(version_id: str, payload: DraftIn, authorization: Optional[str] =
                     DocumentDraft.operator_id == payload.operator_id)
             .first()
         )
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         if existing:
             if payload.draft_body is not None:
                 existing.draft_body = payload.draft_body

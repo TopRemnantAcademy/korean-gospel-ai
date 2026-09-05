@@ -11,11 +11,14 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 from ..db import get_session
-from ..models.orm import Interaction, Subscriber
+from ..models.orm import Interaction
 
 
 # ── 헬퍼 ─────────────────────────────────────────────────────────────────────
@@ -25,9 +28,10 @@ def days_since_last_active(dt_str: Optional[str]) -> Optional[int]:
     if not dt_str:
         return None
     try:
-        dt = datetime.fromisoformat(dt_str.split(".")[0])
-        return max(0, (datetime.now(datetime.UTC) - dt).days)
-    except Exception:
+        dt = datetime.fromisoformat(dt_str.split(".")[0]).replace(tzinfo=timezone.utc)
+        return max(0, (datetime.now(timezone.utc) - dt).days)
+    except Exception as e:
+        logger.debug("[greeting] unparseable last_active_at=%r: %s", dt_str, e)
         return None
 
 
@@ -46,8 +50,8 @@ def get_last_interaction(sub_id: str) -> Optional[dict]:
                     "question": (row.question or "")[:100],
                     "created_at": str(row.created_at),
                 }
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug("greeting query failed: %s", _e)
     return None
 
 
@@ -159,7 +163,7 @@ async def llm_greeting(
 
     context = "\n".join(ctx_lines) if ctx_lines else "첫 방문"
 
-    lang_label = {"ko": "한국어", "en": "영어", "zh": "중국어"}.get(target_lang, "한국어")
+    lang_label = {"ko": "한국어", "en": "영어", "zh": "중국어", "ja": "일본어"}.get(target_lang, "한국어")
     system = _LLM_SYSTEM + f"\n\n언어: {lang_label}로 작성"
 
     try:
@@ -194,10 +198,11 @@ async def generate_greeting(
             "is_first_visit": bool,
         }
     """
+    import asyncio
     from .subscriber_service import get_or_create
 
-    profile          = get_or_create(sub_id)
-    last_interaction = get_last_interaction(sub_id)
+    profile          = await asyncio.to_thread(get_or_create, sub_id)
+    last_interaction = await asyncio.to_thread(get_last_interaction, sub_id)
     days_away        = days_since_last_active(profile.get("last_active_at"))
     is_first_visit   = not last_interaction or (profile.get("total_questions", 0) <= 1)
 

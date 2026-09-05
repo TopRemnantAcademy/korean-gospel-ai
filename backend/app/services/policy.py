@@ -15,14 +15,14 @@
 from __future__ import annotations
 import re
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import settings
+from .fast_judge import is_judge_fast_pass
 
 
 @dataclass
@@ -51,16 +51,40 @@ class JudgeResult(BaseModel):
     pass_: bool                         # 톤 OK?
     score: float                        # 0.0 ~ 1.0
     notes: str = ""
-    flattery_flags: FlatteryFlags = FlatteryFlags()
-    violation_flags: list[str] = []     # Layer C(regen) 가 소비
+    flattery_flags: FlatteryFlags = Field(default_factory=FlatteryFlags)
+    violation_flags: list[str] = Field(default_factory=list)     # Layer C(regen) 가 소비
 
 
-@lru_cache(maxsize=1)
+_rules_cache: dict[str, tuple[dict, float]] = {}  # {"rules": (rules_dict, mtime)}
+
+
 def _load_rules() -> dict:
-    p = settings.root_dir / settings.policy_rules_path
-    if not p.exists():
+    """정책 규칙 로드 — 파일 수정 시간 기반 캐시 (lru_cache 대체)."""
+    candidates: list = []
+    if settings.policy_rules_path:
+        candidates.append(settings.policy_rules_path)
+    candidates += ["data/eval/policy_rules.yaml", "data/policy/policy_rules.yaml"]
+    for rel in candidates:
+        p = Path(rel) if Path(rel).is_absolute() else settings.root_dir / rel
+        if p.exists():
+            break
+    else:
         return {"input_blocklist": [], "input_warnings": [], "output_must_avoid": []}
-    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    cached = _rules_cache.get("rules")
+    if cached and cached[1] == mtime:
+        return cached[0]
+    rules = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    _rules_cache["rules"] = (rules, mtime)
+    return rules
+
+
+def clear_policy_cache() -> None:
+    """정책 캐시 강제 무효화 (관리자 API에서 호출)."""
+    _rules_cache.clear()
 
 
 # ---------- Input policy ----------
@@ -95,17 +119,28 @@ def check_input(text: str) -> PolicyResult:
 
 
 # ---------- Output policy (LLM-as-judge) ----------
-async def judge_output(question: str, answer: str, target_lang: str = "ko") -> JudgeResult:
+async def judge_output(question: str, answer: str, target_lang: str = "ko", primary_provider: Optional[str] = None) -> JudgeResult:
     """LLM judge 가 신학적 톤 + 아첨금지 5개 항목을 검증. policy_enabled=False 면 자동 통과."""
     if not settings.policy_enabled:
         return JudgeResult(pass_=True, score=1.0)
+
+    from .flattery_filter import check_flattery
+    fl = check_flattery(answer, target_lang=target_lang)
+    if is_judge_fast_pass(answer, len(fl.matched_patterns)):
+        return JudgeResult(
+            pass_=True,
+            score=0.95,
+            notes="fast pass - 아첨/이모지 없고 길이 충분",
+            flattery_flags=FlatteryFlags(),
+            violation_flags=[],
+        )
 
     from .llm.factory import get_llm
     from .llm.base import Message
     from ..prompts.policy_judge import get_judge_prompt
     import json
 
-    llm = get_llm()
+    llm = get_llm(primary_provider)
     judge_system = get_judge_prompt(target_lang)
     user = f"[질문]\n{question}\n\n[답변]\n{answer}"
 

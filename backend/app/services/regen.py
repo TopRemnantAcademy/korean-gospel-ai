@@ -25,6 +25,7 @@ async def regenerate_strict(
     system_prompt: str,
     target_lang: str,
     violation_flags: list[str],
+    question: str = "",
     primary_provider: Optional[str] = None,
 ) -> tuple[str, str]:
     """위반 답변을 STRICT 모드로 1회 재생성한다.
@@ -52,7 +53,7 @@ async def regenerate_strict(
 
         # 재생성 결과를 Layer A + B 재검사
         filter_result = check_flattery(new_text, target_lang)
-        judge_result = await judge_output("", new_text, target_lang)  # question 은 이미 검사됨
+        judge_result = await judge_output(question, new_text, target_lang, primary_provider=primary_provider)  # question 은 이미 검사됨
 
         if not filter_result.violated and not judge_result.violation_flags:
             logger.info("regen: succeeded (violations cleared)")

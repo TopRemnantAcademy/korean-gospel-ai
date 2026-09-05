@@ -2,6 +2,7 @@
 
 운영자가 못 끄도록 코드로 박는다 (정책 룰이 아닌 하드코딩).
 """
+
 # =============================================================================
 # 🔧 AI-AGENT-WORK
 # Agent: Claude (Cowork)
@@ -15,7 +16,7 @@
 # =============================================================================
 from __future__ import annotations
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 # N3: 공백/영어/한자 우회를 막기 위해 패턴 다중화
@@ -24,34 +25,13 @@ SAFETY_TRIGGERS = [
         "code": "SUICIDE_SELFHARM",
         "pattern": re.compile(
             r"(자\s*살|자\s*해|죽\s*고\s*싶|목\s*숨\s*을\s*끊|살\s*고\s*싶\s*지\s*않"
-            r"|세\s*상\s*떠\s*나\s*고\s*싶|끝\s*낼\s*래|이\s*번\s*이\s*마\s*지\s*막"
+            r"|세\s*상\s*떠\s*나\s*고\s*싶|돌아가고\s*싶|돌아가시고\s*싶|돌아가실\s*것"
+            r"|세상\s*떠나시고\s*싶|세상\s*떠나실\s*것"
+            r"|끝\s*낼\s*래|이\s*번\s*이\s*마\s*지\s*막"
             r"|스\s*스\s*로\s*를?\s*해\s*치"
             r"|want\s+to\s+(die|end\s+it|kill\s+myself)|self.?harm|suicid"
             r"|自[殺殘杀]|想死)",
             re.IGNORECASE,
-        ),
-        "append": (
-            "\n\n---\n"
-            "🆘 **지금 힘드신가요?**\n"
-            "- 한국생명의전화: **1588-9191** (24시간)\n"
-            "- 정신건강위기상담: **1577-0199**\n"
-            "혼자가 아닙니다. 지금 바로 연락 가능합니다."
-        ),
-    },
-    {
-        "code": "ADDICTION",
-        "pattern": re.compile(
-            r"(금\s*단|약\s*물|마\s*약|중\s*독|술\s*끊|단\s*약"
-            r"|alcohol\s+withdrawal|drug\s+addict|substance\s+abuse"
-            r"|戒毒|戒酒|毒品)",
-            re.IGNORECASE,
-        ),
-        "append": (
-            "\n\n---\n"
-            "💚 **중독 회복 지원**\n"
-            "- 한국마약퇴치운동본부 상담: **1899-0893**\n"
-            "- 중독상담전화: **1577-0199**\n"
-            "약물 조절은 반드시 담당 의사·전문가와 상담하시기 바랍니다."
         ),
     },
 ]
@@ -63,11 +43,20 @@ HARD_BLOCK_PATTERNS = [
     re.compile(r"지옥에\s*갈\s*것입니다"),
     re.compile(r"구원받을\s*수\s*없"),
     re.compile(r"하나님이\s*버리셨"),
+    re.compile(r"you\s+will\s+go\s+to\s+hell", re.IGNORECASE),
+    re.compile(r"you\s+cannot\s+be\s+saved", re.IGNORECASE),
+    re.compile(r"god\s+has\s+abandoned\s+you", re.IGNORECASE),
+    re.compile(r"你会下地狱"),
+    re.compile(r"你不能得救"),
+    re.compile(r"上帝已经抛弃了你"),
     # 의료 거부 권유
     re.compile(r"이?\s*약을?\s*끊으세요"),
     re.compile(r"약\s*(안\s*먹어도|보다\s*기도가?\s*먼저)"),
     re.compile(r"병원에?\s*(안\s*가도|갈\s*필요\s*(없|없어))"),
     re.compile(r"신앙으로\s*모든?\s*병"),
+    re.compile(r"stop\s+taking\s+your\s+medicine", re.IGNORECASE),
+    re.compile(r"停止服药"),
+    re.compile(r"不用去医院"),
     # 번영신학 허위 약속
     re.compile(r"헌금(하면|을\s*드리면)\s*(복|축복|병이?\s*낫)"),
     re.compile(r"십일조를?\s*드리면\s*복"),
@@ -82,11 +71,11 @@ HARD_BLOCK_PATTERNS = [
 
 @dataclass
 class SafetyVerdict:
-    answer: str               # 최종 답변 (안전망 추가됐을 수 있음)
-    triggered: list[str]      # 발동된 룰 코드
-    blocked: bool             # 하드블록 발동?
+    answer: str  # 최종 답변 (안전망 추가됐을 수 있음)
+    triggered: list[str]  # 발동된 룰 코드
+    blocked: bool  # 하드블록 발동?
     block_reason: str = ""
-    appended_text: str = ""   # N8: 안전망으로 추가된 텍스트만 (prefix-slice 위험 제거)
+    appended_text: str = ""  # N8: 안전망으로 추가된 텍스트만 (prefix-slice 위험 제거)
 
 
 # D-C23: 율법주의·행위 구원 표현 감지 (출력 soft-block — 재생성 후보)
@@ -136,7 +125,7 @@ def apply(question: str, answer: str) -> SafetyVerdict:
                     "죄송합니다. 답변 중 부적절한 표현이 감지되어 보여드릴 수 없습니다.\n"
                     "다른 표현으로 다시 질문해 주시거나, 상담자에게 연결을 요청하실 수 있습니다."
                 ),
-                triggered=[],
+                triggered=[f"hard_block:{pat.pattern}"],
                 blocked=True,
                 block_reason=f"hard_block:{pat.pattern}",
                 appended_text="",
@@ -148,8 +137,10 @@ def apply(question: str, answer: str) -> SafetyVerdict:
     for rule in SAFETY_TRIGGERS:
         if rule["pattern"].search(combined):
             triggered.append(rule["code"])
-            extras.append(rule["append"])
+            extras.append(rule.get("append", ""))
 
     appended = "".join(extras)
     final = answer + appended
-    return SafetyVerdict(answer=final, triggered=triggered, blocked=False, appended_text=appended)
+    return SafetyVerdict(
+        answer=final, triggered=triggered, blocked=False, appended_text=appended
+    )

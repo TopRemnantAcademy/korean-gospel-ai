@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Optional
 
-from .base import BaseLLM, LLMResponse, Message
+from .base import BaseLLM, LLMResponse, Message, text_from_message
 
 
 class OpenAILLM(BaseLLM):
@@ -48,8 +48,11 @@ class OpenAILLM(BaseLLM):
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if not resp.choices:
+            return LLMResponse(text="", prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                              model=self._model, provider=self.provider_name)
         choice = resp.choices[0]
-        text = choice.message.content or ""
+        text = text_from_message(choice.message)
         usage = resp.usage
         return LLMResponse(
             text=text,

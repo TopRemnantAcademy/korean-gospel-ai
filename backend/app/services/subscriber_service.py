@@ -1,4 +1,5 @@
 """사용자 프로필 관리 서비스 (관제탑 기능 지원)"""
+
 # =============================================================================
 # 🔧 AI-AGENT-WORK
 # Agent: Claude (Cowork)
@@ -8,11 +9,9 @@
 # Status: COMPLETED
 # =============================================================================
 from __future__ import annotations
-from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
-from sqlalchemy import update as sa_update
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from ..db import get_session
 from ..models.orm import Subscriber
 
@@ -43,38 +42,74 @@ def _row_to_dict(row: "Subscriber") -> dict:
         "topic_interests": row.topic_interests,
         "salvation_status": row.salvation_status,
         "salvation_confidence": row.salvation_confidence,
-        "salvation_last_signal_at": str(row.salvation_last_signal_at) if row.salvation_last_signal_at else None,
+        "salvation_last_signal_at": str(row.salvation_last_signal_at)
+        if row.salvation_last_signal_at
+        else None,
         "assume_saved": row.assume_saved,
         "darakbang_role": row.darakbang_role,
         "darakbang_chapter": row.darakbang_chapter,
-        "darakbang_joined_at": str(row.darakbang_joined_at) if row.darakbang_joined_at else None,
+        "darakbang_joined_at": str(row.darakbang_joined_at)
+        if row.darakbang_joined_at
+        else None,
         "darakbang_verified": row.darakbang_verified,
-        # 구독/무료체험
-        "subscription_tier": row.subscription_tier or "guest",
-        "trial_expires_at": str(row.trial_expires_at) if row.trial_expires_at else None,
-        "subscribed_at": str(row.subscribed_at) if row.subscribed_at else None,
         # 종교 분류
         "religion": row.religion,
         "denomination": row.denomination,
-        # 봇
-        "bot_score": row.bot_score,
+        # 봇 관리
         "flagged_as_bot": row.flagged_as_bot,
+        "bot_score": row.bot_score or 0.0,
+        # 이메일 인증 / 티어 (2026-07-23)
+        "email_verified": bool(row.email_verified),
+        "email_verified_at": str(row.email_verified_at) if row.email_verified_at else None,
+        "is_lifetime_member": bool(row.is_lifetime_member),
+        "subscription_tier": row.subscription_tier or "free",
+        "subscription_expires_at": row.subscription_expires_at.isoformat() if row.subscription_expires_at else None,
     }
 
+
 # N10: update_profile 화이트리스트 — 사용자가 직접 수정 가능한 필드
-_USER_EDITABLE: frozenset[str] = frozenset({
-    "emotional_state", "current_struggle", "preferred_tone",
-    "faith_stage", "journey_stage", "age_group", "gender",
-    "display_name", "email",
-})
+_USER_EDITABLE: frozenset[str] = frozenset(
+    {
+        "emotional_state",
+        "current_struggle",
+        "preferred_tone",
+        "faith_stage",
+        "journey_stage",
+        "age_group",
+        "gender",
+        "display_name",
+        "consent_data",
+        "consent_kakao",
+    }
+)
 # 운영자(by_operator=True)만 수정 가능한 필드
-_OPERATOR_ONLY: frozenset[str] = frozenset({
-    "salvation_status", "salvation_confidence", "assume_saved",
-    "auth_status", "is_darakbang_member", "darakbang_role",
-    "darakbang_chapter", "darakbang_verified", "darakbang_joined_at",
-    "onboarding_step", "consent_data", "consent_kakao",
-    "session_count", "total_questions",
-})
+_OPERATOR_ONLY: frozenset[str] = frozenset(
+    {
+        "salvation_status",
+        "salvation_confidence",
+        "assume_saved",
+        "auth_status",
+        "is_darakbang_member",
+        "darakbang_role",
+        "darakbang_chapter",
+        "darakbang_verified",
+        "darakbang_joined_at",
+        "onboarding_step",
+        "consent_data",
+        "consent_kakao",
+        "session_count",
+        "total_questions",
+        "email",
+        # 봇 관리
+        "flagged_as_bot",
+        "bot_score",
+        # 이메일 인증 / 티어 (2026-07-23)
+        "email_verified",
+        "is_lifetime_member",
+        "subscription_tier",
+        "subscription_expires_at",
+    }
+)
 
 # =============================================================================
 # 🔧 AI-AGENT-WORK
@@ -94,27 +129,25 @@ _OPERATOR_ONLY: frozenset[str] = frozenset({
 # Status: COMPLETED
 # =============================================================================
 
+
 # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: dict 반환으로 변경 — DetachedInstanceError 방지 (B5/A2 fix)
 def get_or_create(sub_id: str) -> dict:
-    """사용자 프로필을 dict로 반환. 세션 밖에서도 안전하게 접근 가능."""
     with get_session() as s:
         row = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
         if not row:
-            from ..config import settings as _cfg
-            from datetime import timedelta
-            now = datetime.now(datetime.UTC)
-            row = Subscriber(
-                subscriber_id=sub_id,
-                tokens_daily=_cfg.tokens_daily_guest,
-                trial_expires_at=now + timedelta(days=3),  # 3일 무료체험 자동 부여
-            )
-            s.add(row)
-            s.flush()
-        elif row.trial_expires_at is None and row.subscription_tier == "guest":
-            # 기존 guest 사용자 중 trial_expires_at 미설정 → first_seen_at 기준 소급 적용
-            from datetime import timedelta
-            base = row.first_seen_at or datetime.now(datetime.UTC)
-            row.trial_expires_at = base + timedelta(days=3)
+            row = Subscriber(subscriber_id=sub_id)
+            try:
+                s.add(row)
+                s.flush()
+            except IntegrityError:
+                s.rollback()
+                row = (
+                    s.query(Subscriber)
+                    .filter(Subscriber.subscriber_id == sub_id)
+                    .first()
+                )
+                if row is None:
+                    raise
         return _row_to_dict(row)
 
 
@@ -127,13 +160,19 @@ def prepare_profile(sub_id: str, signal: Dict[str, Any] | None = None) -> dict:
     with get_session() as s:
         row = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
         if not row:
-            from ..config import settings as _cfg
-            row = Subscriber(
-                subscriber_id=sub_id,
-                tokens_daily=_cfg.tokens_daily_guest,
-            )
-            s.add(row)
-            s.flush()
+            row = Subscriber(subscriber_id=sub_id)
+            try:
+                s.add(row)
+                s.flush()
+            except IntegrityError:
+                s.rollback()
+                row = (
+                    s.query(Subscriber)
+                    .filter(Subscriber.subscriber_id == sub_id)
+                    .first()
+                )
+                if row is None:
+                    raise
 
         row.total_questions = (row.total_questions or 0) + 1
 
@@ -147,29 +186,31 @@ def prepare_profile(sub_id: str, signal: Dict[str, Any] | None = None) -> dict:
 
         return _row_to_dict(row)
 
-def get_all_subscribers() -> list[dict]:
+
+def get_all_subscribers(limit: int = 10000, offset: int = 0) -> list[dict]:
     # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: dict 리스트 반환으로 변경 (B5 일관성)
     # ❌ AI-REMOVE 2026-05-20 [Cascade]: is_believer 제거 (ORDERS B6 - salvation_status로 대체됨)
+    # BUG-09 수정: limit/offset 파라미터 추가 — 백엔드 API 의 페이지네이션 지원.
+    # 기본값 10000은 사실상 전체 반환 (기존 호출자 호환성).
+    limit = max(1, min(limit, 10000))
+    offset = max(0, offset)
     with get_session() as s:
-        subs = s.query(Subscriber).order_by(Subscriber.last_active_at.desc()).all()
-        return [
-            {
-                "subscriber_id": sub.subscriber_id,
-                "display_name": sub.display_name,
-                "journey_stage": sub.journey_stage,
-                "faith_stage": sub.faith_stage,
-                "emotional_state": sub.emotional_state,
-                "is_darakbang_member": sub.is_darakbang_member,
-                "total_questions": sub.total_questions,
-                "session_count": sub.session_count,
-                "onboarding_step": sub.onboarding_step,
-                "last_active_at": str(sub.last_active_at) if sub.last_active_at else None,
-                "first_seen_at": str(sub.first_seen_at) if sub.first_seen_at else None,
-            }
-            for sub in subs
-        ]
+        subs = (
+            s.query(Subscriber)
+            .order_by(Subscriber.last_active_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        # ✏️ 2026-07-29: 목록 직렬화를 _row_to_dict 로 일원화.
+        # (기존 하드코딩 dict 가 subscription_tier/is_lifetime_member/subscription_expires_at/
+        #  email_verified/auth_status/age_group/gender 등을 누락해 유저관리 페이지 표시 오류 발생)
+        return [_row_to_dict(sub) for sub in subs]
 
-def update_profile(sub_id: str, fields: Dict[str, Any], *, by_operator: bool = False) -> dict:
+
+def update_profile(
+    sub_id: str, fields: Dict[str, Any], *, by_operator: bool = False
+) -> dict:
     # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: dict 반환으로 변경 (B5 일관성)
     # ✏️ AI-CHANGE 2026-05-26 [Claude]: N10 — 화이트리스트 필터 추가 (권한 승격 방지)
     allowed = _USER_EDITABLE | _OPERATOR_ONLY if by_operator else _USER_EDITABLE
@@ -181,10 +222,10 @@ def update_profile(sub_id: str, fields: Dict[str, Any], *, by_operator: bool = F
             s.add(sub)
         for k, v in safe_fields.items():
             setattr(sub, k, v)
-        s.commit()
-        s.refresh(sub)
-    # 변경 후 최신 dict 반환
-    return get_or_create(sub_id)
+        s.flush()
+        profile_dict = _row_to_dict(sub)
+    return profile_dict
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # NOTE: increment_session / increment_question / merge_auto_signal 제거 (2026-06-09)

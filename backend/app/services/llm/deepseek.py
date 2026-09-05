@@ -10,7 +10,7 @@
 from __future__ import annotations
 from typing import Optional
 
-from .base import BaseLLM, LLMResponse, Message
+from .base import BaseLLM, LLMResponse, Message, text_from_message, text_from_delta
 
 
 class DeepSeekLLM(BaseLLM):
@@ -62,8 +62,11 @@ class DeepSeekLLM(BaseLLM):
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if not resp.choices:
+            return LLMResponse(text="", prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                              model=self._model, provider=self.provider_name)
         choice = resp.choices[0]
-        text = choice.message.content or ""
+        text = text_from_message(choice.message)
         usage = resp.usage
         return LLMResponse(
             text=text,
@@ -91,7 +94,20 @@ class DeepSeekLLM(BaseLLM):
             max_tokens=max_tokens,
             stream=True,
         )
+        seen_content = False
+        reasoning_buf: list[str] = []
         async for chunk in stream:
             delta = chunk.choices[0].delta if chunk.choices else None
-            if delta and delta.content:
-                yield delta.content
+            if not delta:
+                continue
+            piece = text_from_delta(delta)
+            if piece:
+                seen_content = True
+                yield piece
+            else:
+                r = getattr(delta, "reasoning_content", None)
+                if r:
+                    reasoning_buf.append(r)
+        # 폴백: content 가 없고 reasoning 에만 답이 있는 모델 대비
+        if not seen_content and reasoning_buf:
+            yield "".join(reasoning_buf)

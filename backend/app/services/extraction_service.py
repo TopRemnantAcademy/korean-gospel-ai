@@ -26,6 +26,22 @@ NOISE_PATTERNS = [
     (re.compile(r"­"), "soft_hyphen"),                                # 소프트 하이픈
 ]
 
+# 신학 영어 용어 화이트리스트 — 영어 제거 시 보존 (취약점 5 수정)
+_THEOLOGY_ENGLISH_WHITELIST = {
+    "agape", "grace", "faith", "gospel", "logos", "hallelujah",
+    "amen", "christ", "jesus", "god", "lord", "spirit", "holy",
+    "sin", "cross", "resurrection", "salvation", "repentance",
+    "covenant", "testament", "genesis", "exodus", "psalm", "proverbs",
+    "israel", "jerusalem", "bethlehem", "galilee", "jordan",
+    "abraham", "moses", "david", "isaiah", "paul", "peter", "john",
+}
+
+
+def _latin_word_preserve(m: "re.Match") -> str:
+    """라틴 단어 제거 시 화이트리스트 단어는 보존."""
+    w = m.group(0)
+    return w if w.lower() in _THEOLOGY_ENGLISH_WHITELIST else ""
+
 
 @dataclass
 class ExtractionResult:
@@ -224,7 +240,8 @@ def _strip_english(text: str) -> tuple[str, dict]:
         # ============================================================
         before = len(stripped)
         stripped = verse_ref_re.sub("", stripped)    # "Jn 3:16" → " 3:16"
-        stripped = latin_word_re.sub("", stripped)   # "love", "grace" 등 제거
+        # 라틴 단어 제거하되 신학 용어 화이트리스트는 보존 (취약점 5)
+        stripped = latin_word_re.sub(_latin_word_preserve, stripped)
         after = len(stripped)
 
         if before != after:

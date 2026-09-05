@@ -1,59 +1,39 @@
 """Hybrid Retriever.
 
-- server 모드 : dense + sparse(BM42) → RRF 융합 → reranker → top-N
-- embedded/memory 모드 : dense only → reranker → top-N (sparse 자동 우회)
+주요 기능:
+- Query Optimizer 기반 쿼리 타입 분석과 동적 가중치 적용
+- dense/sparse 검색 결과 RRF 결합
+- reranker 적용 및 프로필 기반 soft boost
+- retriever 인스턴스 캐시
 """
 # =============================================================================
 # 🔧 AI-AGENT-WORK
 # Agent: Claude (Cowork)
-# Timestamp: 2026-05-26 00:00
-# Task: D-C16 — Salvation-Aware Retriever (C6 대체·강화)
-#       SALVATION_BOOST_MATRIX + DARAKBANG_BOOST_MATRIX 추가
-#       assume_saved 플래그 영향 반영
-# Reason: ORDERS.md EPIC D-C16
-# Status: COMPLETED
+# Timestamp: 2026-05-29
+# Task: Database Grade Upgrade v3
 # =============================================================================
 from __future__ import annotations
+import logging
+import time
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
 from ..config import settings
 from .embedding.factory import get_embedder
 from .vector_store import QdrantStore, RetrievedPoint
-from .reranker import get_reranker, BaseReranker
+from .reranker import get_reranker, NoOpReranker
+from .search_optimizer import analyze_query, analyze_query_async
+from .cache_monitor import cache_monitor
+# 프로필 부스트 매트릭스/로직은 enhanced_rag.profile_boost 에서 단일 소스로 관리 (Wave C/E 단일화)
+from .enhanced_rag.profile_boost import compute_profile_boost
 
 
-# D-C16: (사용자 salvation_status, 자료 target_salvation_stage) → boost
-SALVATION_BOOST_MATRIX: dict[tuple[str, str], float] = {
-    ("unknown",   "seeker"):       +0.40,
-    ("unknown",   "uncertain"):    +0.20,
-    ("unknown",   "gospel_core"):  +0.30,
-    ("seeker",    "seeker"):       +0.35,
-    ("seeker",    "gospel_core"):  +0.50,
-    ("uncertain", "assurance"):    +0.45,
-    ("uncertain", "uncertain"):    +0.25,
-    ("uncertain", "gospel_core"):  +0.35,
-    ("assured",   "discipleship"): +0.25,
-    ("assured",   "assured"):      +0.10,
-    ("mature",    "discipleship"): +0.30,
-    ("mature",    "leadership"):   +0.20,
-    ("mature",    "pastoral"):     +0.15,
-}
-
-# D-C16: (darakbang_role, 자료 darakbang_tier) → boost
-DARAKBANG_BOOST_MATRIX: dict[tuple[str, str], float] = {
-    ("member",  "darakbang_general"): +0.20,
-    ("member",  "darakbang_deep"):    +0.15,
-    ("leader",  "darakbang_general"): +0.10,
-    ("leader",  "darakbang_deep"):    +0.30,
-    ("leader",  "darakbang_leader"):  +0.40,
-    ("pastor",  "darakbang_deep"):    +0.25,
-    ("pastor",  "darakbang_leader"):  +0.35,
-    ("pastor",  "pastoral"):          +0.40,
-}
+logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class RetrievedItem:
     id: str
     text: str
@@ -64,26 +44,134 @@ class RetrievedItem:
     metadata: dict
 
 
-# 임베더 이름별 retriever 캐시 — 매 요청마다 embedder/store/reranker 재생성 방지
-_retriever_cache: dict[str, "HybridRetriever"] = {}
+# ── retriever 캐시 (매 요청마다 재생성 방지) ──
+_retriever_cache: dict[tuple[str, str], "HybridRetriever"] = {}
+_retriever_lock = threading.RLock()
 
 
-def get_retriever(embedder_name: str | None = None) -> "HybridRetriever":
-    """모듈-레벨 캐시에서 retriever 반환. 없으면 생성 후 캐시."""
-    key = embedder_name or settings.embedder
-    if key not in _retriever_cache:
-        _retriever_cache[key] = HybridRetriever(embedder_name=embedder_name)
-    return _retriever_cache[key]
+def get_retriever(embedder_name: str | None = None, collection: str | None = None) -> "HybridRetriever":
+    """모듈-레벨 캐시에서 retriever 반환."""
+    key = (embedder_name or settings.embedder, collection or "")
+
+    # 캐시된 retriever가 있으면 바로 반환
+    if key in _retriever_cache:
+        return _retriever_cache[key]
+
+    with _retriever_lock:
+        # Double-check: 락 대기 중 다른 쓰레드가 초기화했을 수 있음
+        if key in _retriever_cache:
+            return _retriever_cache[key]
+
+        _retriever_cache[key] = HybridRetriever(embedder_name=embedder_name, collection=collection)
+        return _retriever_cache[key]
+
+
+def _rrf_fusion(
+    rankings: list[list[dict]],
+    weights: list[float],
+    k: int = 60,
+) -> list[dict]:
+    """Reciprocal Rank Fusion: 여러 랭킹 리스트를 하나로 합침."""
+    scores: dict[str, float] = {}
+    points: dict[str, Any] = {}
+    dense_ranks: dict[str, int] = {}
+    sparse_ranks: dict[str, int] = {}
+
+    for list_idx, (rank_list, weight) in enumerate(zip(rankings, weights)):
+        if abs(weight) < 1e-9:
+            continue
+        for rank, item in enumerate(rank_list):
+            # Defensive: dense/sparse(Qdrant) pass RetrievedPoint objects,
+            # BM25 fallback passes {"point": RetrievedPoint} dicts.
+            point = item["point"] if isinstance(item, dict) else item
+            if point is None:
+                continue
+            pid = point.id
+            points[pid] = item["point"]
+            scores[pid] = scores.get(pid, 0.0) + weight / (k + rank + 1)
+            if list_idx == 0:
+                dense_ranks[pid] = rank
+            else:
+                sparse_ranks[pid] = rank
+
+    if not scores:
+        return []
+
+    # RRF 점수 기준 정렬
+    sorted_pids = sorted(scores.keys(), key=lambda x: -scores[x])
+    return [
+        {
+            "id": pid,
+            "rrf": scores[pid],
+            "point": points[pid],
+            "dense_rank": dense_ranks.get(pid),
+            "sparse_rank": sparse_ranks.get(pid),
+        }
+        for pid in sorted_pids
+    ]
+
+
+def _merge_duplicate_candidates_fast(items: list[dict]) -> list[dict]:
+    """중복 후보 병합."""
+    if not items:
+        return []
+
+    scores: dict[str, float] = {}
+    point_map: dict[str, Any] = {}
+
+    for item in items:
+        pid = item["id"]
+        point = item["point"]
+        point_map[pid] = point
+        scores[pid] = scores.get(pid, 0.0) + item["rrf"]
+
+    sorted_pids = sorted(scores.keys(), key=lambda x: -scores[x])
+    return [
+        {"id": pid, "rrf": scores[pid], "point": point_map[pid]}
+        for pid in sorted_pids
+    ]
+
+
+def _bm25_sparse(collection: str, query: str, top_k: int) -> list[dict]:
+    """메모리 BM25 인덱스로 sparse 검색."""
+    from .sparse_index import get_index
+    idx = get_index(collection)
+    results = idx.search(query, top_k=top_k)
+    return [
+        {
+            "point": RetrievedPoint(
+                id=chunk_id,
+                score=score,
+                text=payload.get("text", ""),
+                metadata=payload,
+            )
+        }
+        for chunk_id, score, payload in results
+    ]
 
 
 class HybridRetriever:
-    def __init__(self, embedder_name: str | None = None, reranker: BaseReranker | None = None):
+    _CACHE_TTL_SEC = 1800  # 30분 - 검색 쿼리는 반복성이 매우 높음
+
+    def __init__(
+        self, embedder_name: str | None = None, reranker=None, collection: str | None = None
+    ):
         self.embedder_name = embedder_name or settings.embedder
         self.embedder = get_embedder(self.embedder_name)
-        self.store = QdrantStore(self.embedder_name, dim=self.embedder.dim)
-        self.reranker = reranker or get_reranker(
-            settings.reranker, cohere_api_key=settings.cohere_api_key
-        )
+        self.store = QdrantStore(self.embedder_name, dim=self.embedder.dim, collection=collection)
+        # Reranker: get_reranker 내부에서 이미 fail-open(NoOp) 을 보장하지만,
+        # 혹시 모를 예외로부터 채팅 경로를 이중 보호한다.
+        try:
+            self.reranker = reranker or get_reranker(
+                settings.reranker, cohere_api_key=settings.cohere_api_key
+            )
+        except Exception as _rexc:
+            logger.warning(
+                "[retriever] reranker 초기화 예외(%s: %s) → NoOp 폴백",
+                type(_rexc).__name__, _rexc,
+            )
+            self.reranker = NoOpReranker()
+        self._cache: "OrderedDict[tuple, tuple[list[RetrievedItem], float]]" = OrderedDict()
 
     async def retrieve(
         self,
@@ -94,193 +182,198 @@ class HybridRetriever:
         dense_weight: float | None = None,
         sparse_weight: float | None = None,
         profile: Any = None,
-        dense_query: str | None = None,   # V3: HyDE 확장 dense 질의 (None=원질의)
-        sparse_query: str | None = None,  # V3: 키워드 추출 sparse 질의 (None=원질의)
-    ) -> list[RetrievedItem]:  # noqa: E501
+        dense_query: str | None = None,
+        sparse_query: str | None = None,
+    ) -> list[RetrievedItem]:
         import asyncio as _asyncio
 
+        # ══════════════════════════════════════════════════════════════
+        # Stage 0: 쿼리 분석 — Query Optimizer
+        # ══════════════════════════════════════════════════════════════
+        qa = await analyze_query_async(query)
+
+        # 명시적 파라미터 > 옵티마이저 추론 > 기본값
         top_k = top_k or settings.retrieval_top_k
         rerank_top_n = rerank_top_n or settings.rerank_top_n
-        dw = dense_weight if dense_weight is not None else settings.dense_weight
-        sw = sparse_weight if sparse_weight is not None else settings.sparse_weight
+        dw = dense_weight if dense_weight is not None else qa.dense_weight
+        sw = sparse_weight if sparse_weight is not None else qa.sparse_weight
 
-        # ⚡ 1-3) 동기 CPU/IO 작업을 스레드 풀에서 실행 (이벤트 루프 블로킹 방지)
-        #        → asyncio.gather(classify_input, retrieve)가 진정한 병렬로 동작
-        _embedder = self.embedder
+        # 캐시 조회: 프로필은 영향있는 필드만 hash 키로 사용
+        cache_profile = None
+        if profile:
+            # NOTE: faith_stage 는 compute_profile_boost 가 사용하지 않으므로 캐시키에서 제외
+            # (영향 없는 필드로 인한 불필요한 캐시 미스 방지).
+            cache_profile = (
+                profile.get("salvation_status", "unknown"),
+                profile.get("darakbang_role"),
+                bool(profile.get("is_darakbang_member")),
+                bool(profile.get("darakbang_verified")),
+                bool(profile.get("assume_saved")),
+            )
+        cache_key = (
+            query,
+            top_k,
+            rerank_top_n,
+            dw,
+            sw,
+            cache_profile,
+            dense_query,
+            sparse_query,
+        )
+        if cache_key in self._cache:
+            cached_results, cached_at = self._cache[cache_key]
+            if time.time() - cached_at < self._CACHE_TTL_SEC:
+                # LRU: hit 시 최근 사용으로 갱신
+                self._cache.move_to_end(cache_key)
+                start = time.perf_counter()
+                # 호출자가 수정할 수도 있으므로 list만 새로 만듦 (얕은 복사)
+                result = list(cached_results)
+                latency = (time.perf_counter() - start) * 1000
+                cache_monitor.track_retrieval(hit=True, latency_ms=latency)
+                return result
+
+        # 캐시 미스 타이머 시작
+        _retrieval_start = time.perf_counter()
+
+        # ══════════════════════════════════════════════════════════════
+        # Stage 1: Coarse Recall — 최대한 많은 후보 모으기
+        # ══════════════════════════════════════════════════════════════
+        # 최적화: recall_k 를 고정 200 에서 top_k 비례 + 하한으로 축소.
+        # 대규모 데이터에서 Qdrant 탐색량을 크게 줄여 응답 지연을 낮춘다.
+        recall_k = max(top_k * settings.recall_k_per_topk, settings.recall_k_floor)
         _store = self.store
-
         _collection = _store.collection
 
-        def _sync_search():
-            # 임베딩 대상: HyDE 등으로 확장된 dense 질의가 있으면 사용, 없으면 원질의
-            _dense_q = dense_query or query
-            qv = _embedder.embed_query(_dense_q).tolist()   # KURE CPU embedding
-            dense = _store.search_dense(qv, top_k=top_k)     # Qdrant dense
+        # 다중 쿼리 병렬 검색: 모든 확장 쿼리에 대해 dense + sparse 동시 실행
+        # 최적화: 2번째 확장 쿼리부터 recall_k 를 감쇠시켜 전체 호출량 감축.
+        # (원본 쿼리가 가장 중요 → 100%, 이후 쿼리는 보조적 탐색으로 축소)
+        all_candidates = []
+        tasks = []
 
-            # Sparse: Qdrant 서버 BM42 우선, embedded 면 자체 Kiwi+BM25 인덱스 사용 (V2)
-            sparse = _store.search_sparse(query, top_k=top_k)
-            if not sparse:
-                sparse = _bm25_sparse(_collection, sparse_query or query, top_k)
+        for qi, eq in enumerate(qa.expanded_queries):
+            # 첫 번째(원본) 쿼리는 full recall, 이후는 decay 적용
+            q_recall_k = recall_k if qi == 0 else max(
+                settings.recall_k_floor // 2,
+                int(recall_k * (settings.multi_query_recall_decay ** qi)),
+            )
 
-            rankings = [dense] + ([sparse] if sparse else [])
-            weights = ([dw, sw] if sparse else [1.0])
-            return _rrf_fusion(rankings, weights=weights, k=60)
+            async def _search_one(q: str, rk: int = q_recall_k):
+                async def _dense_one():
+                    qv = await _asyncio.to_thread(self.embedder.embed_query, q)
+                    return await _asyncio.to_thread(
+                        _store.search_dense, qv.tolist(), top_k=rk
+                    )
 
-        fused = await _asyncio.to_thread(_sync_search)
-        if not fused:
+                async def _sparse_one():
+                    sres = await _asyncio.to_thread(
+                        _store.search_sparse, q, top_k=rk
+                    )
+                    if not sres:
+                        sres = await _asyncio.to_thread(
+                            _bm25_sparse, _collection, q, rk
+                        )
+                    return sres
+
+                d_res, s_res = await _asyncio.gather(_dense_one(), _sparse_one())
+
+                # search_dense / search_sparse return list[RetrievedPoint];
+                # _bm25_sparse (fallback) returns list[{"point": RetrievedPoint}].
+                # Normalize every item to the dict shape _rrf_fusion expects,
+                # but KEEP the list-of-rank-lists structure (one per sub-search)
+                # so it aligns with `weights` via zip().
+                def _normalize(results):
+                    return [
+                        {"point": r} if not isinstance(r, dict) else r
+                        for r in results
+                    ]
+
+                rankings = [_normalize(d_res)]
+                if s_res:
+                    rankings.append(_normalize(s_res))
+                weights = [dw, sw] if s_res else [1.0]
+                return _rrf_fusion(rankings, weights=weights, k=settings.rrf_k)
+
+            tasks.append(_search_one(eq))
+
+        # 모든 쿼리의 검색 결과 동시 수집
+        fused_results = await _asyncio.gather(*tasks)
+        for fr in fused_results:
+            all_candidates.extend(fr)
+
+        # ══════════════════════════════════════════════════════════════
+        # Stage 2: 중복 병합 - 여러 쿼리에서 나온 같은 문서 점수 합산
+        # ══════════════════════════════════════════════════════════════
+        if len(qa.expanded_queries) > 1 and all_candidates:
+            merged = _merge_duplicate_candidates_fast(all_candidates)
+            merged.sort(key=lambda x: -x["rrf"])
+            final_for_rerank = merged[:max(rerank_top_n * 4, 30)]  # 최적화: 100→30]
+        else:
+            pid_set = set()
+            unique = []
+            for c in sorted(all_candidates, key=lambda x: -x["rrf"]):
+                if c["id"] not in pid_set:
+                    pid_set.add(c["id"])
+                    unique.append(c)
+            final_for_rerank = unique[:max(rerank_top_n * 4, 30)]  # 최적화: 100→30]
+
+        # ══════════════════════════════════════════════════════════════
+        # Stage 3: Fine Rank — rerank로 최종 순위 정밀화
+        # ══════════════════════════════════════════════════════════════
+        if not final_for_rerank:
             return []
 
-        # 4) Rerank (RERANKER=none이면 즉시 반환, bge_m3이면 스레드에서 실행)
-        topN = fused[: max(rerank_top_n * 2, rerank_top_n)]
-        _docs = [it["point"].text for it in topN]
-        rerank_scores = await _asyncio.to_thread(self.reranker.rerank, query, _docs)
-        for it, s in zip(topN, rerank_scores):
-            it["rerank_score"] = s
-        topN.sort(key=lambda it: it["rerank_score"], reverse=True)
-        topN = topN[:rerank_top_n]
+        _docs = [it["point"].text for it in final_for_rerank]
+        try:
+            rerank_scores = await _asyncio.to_thread(self.reranker.rerank, query, _docs)
+        except Exception:
+            logger.exception("[retriever] reranker.rerank 실패")
+            rerank_scores = None
+
+        # V2: RRF(0.3) + rerank(0.7) 결합 점수 먼저 계산
+        if rerank_scores is None or getattr(self.reranker, "name", "") == "none":
+            for it in final_for_rerank:
+                it["final_score"] = it["rrf"]
+        else:
+            for it, rr_score in zip(final_for_rerank, rerank_scores):
+                it["final_score"] = it["rrf"] * 0.3 + float(rr_score) * 0.7
+
+        # ✅ 부스트는 단일 곱셈자(additive 결합)로 적용해 enhanced_rag/pipeline._apply_profile_boost
+        # 와 공식 일치 (base*(1+tb+pb)). 기존 곱셈형 base*(1+tb)*(1+pb) 는 같은 부스트 합에 대해
+        # pipeline 결과와 수치가 달라, eval A/B 비교(승격) 전제를 깨뜨림 (MEMORY 단일 소스 불변식).
+        if qa.preferred_filters or (profile and settings.retriever_boost_enabled):
+            for item in final_for_rerank:
+                boost = 0.0
+                if qa.preferred_filters:
+                    meta = item["point"].metadata
+                    if qa.preferred_filters.get("gospel_core_tag") and meta.get("gospel_core_tag"):
+                        boost += 0.20
+                if profile and settings.retriever_boost_enabled:
+                    boost += compute_profile_boost(item["point"].metadata or {}, profile)
+                if boost:
+                    item["final_score"] *= 1.0 + boost
+
+        final_for_rerank.sort(key=lambda it: it["final_score"], reverse=True)
+        final_for_rerank = final_for_rerank[:rerank_top_n]
 
         results = [
             RetrievedItem(
-                id=p.id,
-                text=p.text,
-                score=it["rerank_score"],
+                id=it["point"].id,
+                text=it["point"].text,
+                score=it["final_score"],
                 rrf_score=it["rrf"],
                 dense_rank=it.get("dense_rank"),
                 sparse_rank=it.get("sparse_rank"),
-                metadata=p.metadata,
+                metadata=it["point"].metadata,
             )
-            for it in topN
-            for p in [it["point"]]
+            for it in final_for_rerank
         ]
-        
-        # C6: 사용자 프로필 기반 매칭 가중치 (Boost)
-        # ✏️ AI-CHANGE 2026-05-19 [Antigravity]: profile.xxx → profile.get("xxx") dict 접근 (B5/A2 fix)
-        # ✏️ AI-CHANGE 2026-05-26 [Claude]: D-C16 — SALVATION_BOOST_MATRIX + DARAKBANG_BOOST_MATRIX 추가
-        # ✏️ AI-CHANGE 2026-05-27 [Claude]: settings.retriever_boost_enabled 플래그로 boost on/off 가능
-        if profile and settings.retriever_boost_enabled:
-            salvation_status = profile.get("salvation_status", "unknown")
-            darakbang_role = profile.get("darakbang_role") if profile.get("is_darakbang_member") else None
-            darakbang_verified = profile.get("darakbang_verified", False)
-            assume_saved = profile.get("assume_saved", False)
 
-            for item in results:
-                boost = 0.0
-                _faith = profile.get("faith_stage")
-                _journey = profile.get("journey_stage")
-                _tone = profile.get("preferred_tone")
+        _retrieval_latency = (time.perf_counter() - _retrieval_start) * 1000
+        cache_monitor.track_retrieval(hit=False, latency_ms=_retrieval_latency)
 
-                # C6: 기존 프로필 기반 boost
-                if _faith and _faith in (item.metadata.get("target_audience") or []):
-                    boost += 0.15
-                if _journey and _journey in (item.metadata.get("target_stage") or []):
-                    boost += 0.20
-                if _tone == "gentle" and item.metadata.get("emotion_tone") == "comforting":
-                    boost += 0.08
-                if _faith in ("seeker", "new_believer") and item.metadata.get("difficulty", 3) <= 2:
-                    boost += 0.10
+        # 캐시 저장 + 크기 제한 (OrderedDict LRU — O(1) eviction)
+        self._cache[cache_key] = (results, time.time())
+        while len(self._cache) > 1500:
+            self._cache.popitem(last=False)  # 가장 오래된 항목 제거
 
-                # D-C16: salvation boost matrix
-                doc_salvation_stages = item.metadata.get("target_salvation_stage") or []
-                if isinstance(doc_salvation_stages, str):
-                    doc_salvation_stages = [doc_salvation_stages]
-                for stage in doc_salvation_stages:
-                    b = SALVATION_BOOST_MATRIX.get((salvation_status, stage), 0.0)
-                    if b:
-                        boost += b
-                        break  # 한 문서에 여러 stage 태그 있어도 첫 매칭만
-
-                # gospel_core_tag 자료 — seeker/uncertain 에게 최우선
-                if item.metadata.get("gospel_core_tag") and salvation_status in ("unknown", "seeker", "uncertain"):
-                    boost += 0.30
-
-                # D-C16: assume_saved 플래그 영향
-                if assume_saved:
-                    # "구원받았다 치고" 모드 — discipleship/sanctification 자료 활성화
-                    if "discipleship" in doc_salvation_stages or "assured" in doc_salvation_stages:
-                        boost += 0.25
-                else:
-                    # 기본 모드 — gospel_core/seeker 자료 강화 (98% 가정)
-                    if "seeker" in doc_salvation_stages or "gospel_core" in doc_salvation_stages:
-                        boost += 0.15
-
-                # D-C16: darakbang boost matrix (verified 멤버만 적용)
-                if darakbang_role and darakbang_verified:
-                    doc_darakbang_tier = item.metadata.get("darakbang_tier")
-                    if doc_darakbang_tier:
-                        b = DARAKBANG_BOOST_MATRIX.get((darakbang_role, doc_darakbang_tier), 0.0)
-                        boost += b
-
-                item.score += boost
-
-            results.sort(key=lambda x: x.score, reverse=True)
-
-        # D-C24: gospel_core fallback — 결과 없고 사용자가 seeker/uncertain 이면 gospel_core 자료 보충
-        if not results and profile and profile.get("salvation_status") in ("unknown", "seeker", "uncertain"):
-            from ..config import settings as _s
-            if _s.gospel_core_fallback_enabled:
-                results = await self._gospel_core_fallback(query, top_n=3)
-
-        return results
-
-    async def _gospel_core_fallback(self, query: str, top_n: int = 3) -> list[RetrievedItem]:
-        """D-C24: gospel_core_tag=True 자료 중 query 와 가장 유사한 것을 fallback으로 반환."""
-        try:
-            from qdrant_client.http import models as qm
-            gospel_filter = qm.Filter(must=[
-                qm.FieldCondition(key="gospel_core_tag", match=qm.MatchValue(value=True))
-            ])
-            qv = self.embedder.embed_query(query).tolist()
-            hits = self.store.search_dense(qv, top_k=top_n, flt=gospel_filter)
-            return [
-                RetrievedItem(
-                    id=p.id, text=p.text, score=p.score,
-                    rrf_score=p.score, dense_rank=i + 1, sparse_rank=None,
-                    metadata=p.metadata,
-                )
-                for i, p in enumerate(hits)
-            ]
-        except Exception:
-            return []
-
-
-
-
-
-def _bm25_sparse(collection: str, query: str, top_k: int) -> list:
-    """자체 Kiwi+BM25 인덱스로 sparse 검색 → RetrievedPoint 리스트 (V2).
-
-    embedded Qdrant 가 BM42 를 못 쓸 때 정확어·성경장절 검색을 부활시킨다.
-    인덱스가 비어있으면 [] 반환 (dense-only 로 graceful fallback).
-    """
-    try:
-        from .sparse_index import get_index
-        idx = get_index(collection)
-        if idx.size() == 0:
-            return []
-        hits = idx.search(query, top_k=top_k)
-        out = []
-        for chunk_id, score, payload in hits:
-            payload = dict(payload)
-            text = payload.pop("text", "")
-            out.append(RetrievedPoint(id=str(chunk_id), score=score, text=text, metadata=payload))
-        return out
-    except Exception:
-        return []
-
-
-def _rrf_fusion(rankings, *, weights=None, k=60):
-    weights = weights or [1.0] * len(rankings)
-    s = sum(weights) or 1.0
-    weights = [w / s for w in weights]
-    accum: dict[str, dict] = {}
-    rank_keys = ["dense_rank", "sparse_rank"]
-    for src_idx, hits in enumerate(rankings):
-        for rank, pt in enumerate(hits, start=1):
-            key = pt.id
-            entry = accum.get(key)
-            if entry is None:
-                entry = {"point": pt, "rrf": 0.0, "dense_rank": None, "sparse_rank": None}
-                accum[key] = entry
-            entry["rrf"] += weights[src_idx] * (1.0 / (k + rank))
-            entry[rank_keys[src_idx] if src_idx < len(rank_keys) else "dense_rank"] = rank
-    return sorted(accum.values(), key=lambda e: e["rrf"], reverse=True)
+        return list(results)

@@ -1,4 +1,4 @@
-"""Alembic 환경 설정 — Korean Gospel AI.
+"""Alembic 환경 설정 — .
 
 DB URL: DATABASE_URL 환경변수 우선, 없으면 .gospel.db SQLite.
 모델: backend.app.models.orm (SQLAlchemy ORM 전체).

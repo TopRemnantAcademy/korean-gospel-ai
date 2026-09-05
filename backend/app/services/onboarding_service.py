@@ -23,7 +23,6 @@ ORDERS.md D-C15: 기존 C3 폐기. 구원 상태(salvation_status) 가 시스템
 from __future__ import annotations
 from typing import Optional
 
-from .subscriber_service import get_or_create, update_profile
 
 
 # D-C15: 구원 질문이 1번인 재설계 온보딩
@@ -54,46 +53,35 @@ ONBOARDING = [
         "by_operator": True,  # salvation_status 는 operator 권한 필요
     },
     {
+        # ✏️ 2026-07-29: 기존 "다락방 모임" 질문 폐기 → 자기이해(신앙 자각) 심층 질문으로 대체.
+        # 다락방은 별도 사역 컨텍스트(ORM/프롬프트)로 운영자 설정 방식 유지, 온보딩에서는 질문하지 않음.
         "step": 2,
         "after_questions": 2,
-        "field": "is_darakbang_member",
-        "ask": "혹시 *다락방* 모임에 함께하고 계신가요?",
-        "choices": ["네, 식구입니다", "인도자입니다", "한두 번 가봤어요", "아니요", "다락방이 뭔가요?"],
-        "_choice_map": {
-            0: True,   # is_darakbang_member=True, darakbang_role=member
-            1: True,   # is_darakbang_member=True, darakbang_role=leader
-            2: False,
-            3: False,
-            4: False,
-        },
-        "by_operator": True,
+        "field": "faith_self_view",
+        "ask": (
+            "지금 잠시, 당신 스스로를 가장 솔직하게 돌아보신다면 — "
+            "*하나님과의 관계에서 가장 막연하거나 '아직 잘 모르겠다'고 느껴지는 "
+            "부분이 있나요?* (그 답이, 당신이 지금 서 있는 곳을 더 정확히 보시는 데 "
+            "도움이 될 거예요.)"
+        ),
+        "free_text": True,
     },
     {
         "step": 3,
-        "after_questions": 3,
-        "field": "darakbang_chapter",
-        "ask": "어느 다락방 모임에 계세요?",
-        "free_text": True,
-        "optional": True,
-        "condition": "is_darakbang_member",  # is_darakbang_member == True 일 때만
-        "by_operator": True,
-    },
-    {
-        "step": 4,
         "after_questions": 5,
         "field": "current_struggle",
         "ask": "지금 마음에 가장 무거운 한 가지를 짧게 알려주실 수 있을까요?",
         "free_text": True,
     },
     {
-        "step": 5,
+        "step": 4,
         "after_questions": 8,
         "field": "preferred_tone",
         "ask": "어떤 말투가 더 편하세요?",
         "choices": ["부드럽게", "직접적으로", "격려하듯", "말씀 중심으로"],
     },
     {
-        "step": 6,
+        "step": 5,
         "after_questions": 12,
         "field": "email",
         "ask": "이메일을 알려주시면 매일 묵상을 보내드릴까요?",
@@ -107,38 +95,57 @@ ONBOARDING = [
 # ✏️ AI-CHANGE 2026-05-26 [Claude]: D-C15 — ONBOARDING 재설계 반영 (condition 체크 추가)
 def check_and_get_onboarding_question(sub_id: str) -> Optional[str]:
     """현재 사용자의 질문 횟수와 완료 상태를 확인하여 온보딩 질문 반환."""
-    sub = get_or_create(sub_id)
+    # ✅ 2026-07-24 근본수정: get_session()(지연 BEGIN)은 "읽기→쓰기 승격" 시
+    # WAL 모드에서 busy_timeout 을 무시하고 즉시 SQLITE_BUSY_SNAPSHOT
+    # ("database is locked")으로 실패한다. BEGIN IMMEDIATE 로 처음부터
+    # 쓰기 락을 잡아 busy_timeout(30s) 대기가 정상 동작하도록 한다.
+    from ..db import get_session_immediate
+    from ..models.orm import Subscriber
 
-    for item in ONBOARDING:
-        if item["step"] <= sub["onboarding_step"]:
-            continue
-        if sub["total_questions"] < item["after_questions"]:
-            continue
+    with get_session_immediate() as s:
+        sub = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
+        if not sub:
+            sub = Subscriber(subscriber_id=sub_id)
+            s.add(sub)
+            s.flush()
 
-        # condition 체크 (예: is_darakbang_member == True 일 때만 darakbang_chapter 질문)
-        condition_field = item.get("condition")
-        if condition_field and not sub.get(condition_field):
-            # 조건 불충족 → 이 step 건너뜀 (step은 완료로 표시)
-            update_profile(sub_id, {"onboarding_step": item["step"]}, by_operator=True)
-            continue
+        sub_onboarding_step = sub.onboarding_step or 0
+        total_questions = sub.total_questions or 0
+        question_text = None
 
-        # 이미 해당 필드가 채워져 있으면 스킵
-        if sub.get(item["field"]):
-            update_profile(sub_id, {"onboarding_step": item["step"]}, by_operator=True)
-            continue
+        for item in ONBOARDING:
+            if item["step"] <= sub_onboarding_step:
+                continue
+            if total_questions < item["after_questions"]:
+                continue
 
-        # 질문 문자열 구성
-        q = (
-            f"\n\n---\n"
-            f"*잠시만요 — 더 잘 도와드리려면 한 가지만 여쭤봐도 될까요? "
-            f"{item['ask']}*\n"
-            f"*(답 안 해도 괜찮아요 — 그냥 더 잘 도와드리려고 여쭙는 거예요)*"
-        )
-        if item.get("choices"):
-            q += "\n(보기: " + " / ".join(item["choices"]) + ")"
+            # condition 체크 (예: is_darakbang_member == True 일 때만 darakbang_chapter 질문)
+            condition_field = item.get("condition")
+            if condition_field and not getattr(sub, condition_field, None):
+                # 조건 불충족 → 이 step 건너뜀 (step은 완료로 표시)
+                sub_onboarding_step = item["step"]
+                sub.onboarding_step = item["step"]
+                continue
 
-        # 다음 step으로 갱신
-        update_profile(sub_id, {"onboarding_step": item["step"]}, by_operator=True)
-        return q
+            # 이미 해당 필드가 채워져 있으면 스킵
+            if getattr(sub, item["field"], None):
+                sub_onboarding_step = item["step"]
+                sub.onboarding_step = item["step"]
+                continue
 
-    return None
+            # 질문 문자열 구성
+            q = (
+                f"\n\n---\n"
+                f"*잠시만요 — 더 잘 도와드리려면 한 가지만 여쭤봐도 될까요? "
+                f"{item['ask']}*\n"
+                f"*(답 안 해도 괜찮아요 — 그냥 더 잘 도와드리려고 여쭙는 거예요)*"
+            )
+            if item.get("choices"):
+                q += "\n(보기: " + " / ".join(item["choices"]) + ")"
+
+            # 다음 step으로 갱신
+            sub.onboarding_step = item["step"]
+            question_text = q
+            break
+
+        return question_text

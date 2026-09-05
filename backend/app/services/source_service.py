@@ -21,6 +21,19 @@ UPLOADS_DIR = settings.root_dir / "data" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def resolve_storage_path(storage_path: str) -> Path:
+    """DB 저장값(상대/절대 혼재 가능)을 절대 경로로 정규화.
+
+    - 절대 경로 -> 그대로
+    - 상대 경로 -> settings.root_dir 기준 결합
+    media_service._resolve_storage_path 와 동일 규칙.
+    """
+    p = Path(storage_path)
+    if not p.is_absolute():
+        p = settings.root_dir / p
+    return p
+
+
 def find_by_hash(session: Session, content_hash: str) -> Optional[SourceArtifact]:
     return session.query(SourceArtifact).filter(SourceArtifact.content_hash == content_hash).first()
 

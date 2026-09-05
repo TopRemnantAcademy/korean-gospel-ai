@@ -18,10 +18,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ..config import settings
-from .chunker import Chunk
+from .chunker import Chunk, estimate_tokens
 from .llm.base import Message
 from .llm.fallback import chat_with_fallback
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +78,17 @@ async def contextualize_chunks(
     section_context: dict[str, str] = {}
     sec_titles = list(section_groups.keys())
     
+    sem = asyncio.Semaphore(5)
+
+    async def _gen_context_with_sem(title: str, sec_title: str, chunk_text: str, llm_provider: str | None) -> str:
+        async with sem:
+            return await _gen_context(title, sec_title, chunk_text, llm_provider)
+
     tasks = []
     for sec_title in sec_titles:
         group = section_groups[sec_title]
         rep = max(group, key=lambda c: len(c.text))
-        tasks.append(_gen_context(title, sec_title, rep.text, llm_provider))
+        tasks.append(_gen_context_with_sem(title, sec_title, rep.text, llm_provider))
 
     contexts = await asyncio.gather(*tasks)
     for sec_title, ctx in zip(sec_titles, contexts):
@@ -95,6 +101,14 @@ async def contextualize_chunks(
         prefix_parts = [p for p in [title, c.section_title, ctx] if p]
         context_prefix = " — ".join(prefix_parts)
         embed_text = (context_prefix + "\n\n" + c.text) if context_prefix else c.text
+        # 임베더 토큰 한도(KURE 512) 초과 방지 — 맥락은 유지하고 본문을 잘라 클램프.
+        # (초장문 강제분할 직후 최대 청크에 맥락이 더해지면 512 초과 → 조용히 truncate 되던 것 방지)
+        if context_prefix:
+            _max_tok = getattr(settings, "ingest_chunk_max_tokens", 512)
+            if estimate_tokens(embed_text) > _max_tok:
+                _head = context_prefix + "\n\n"
+                _budget_chars = max(120, int((_max_tok - estimate_tokens(_head)) / 0.55))
+                embed_text = _head + c.text[:_budget_chars]
         results.append({
             "chunk": c,
             "embed_text": embed_text,

@@ -34,6 +34,38 @@ class GateResult:
     errors: list[str] = field(default_factory=list)
 
 
+def check_chunk(text: str, chunk_id: int = 0) -> dict:
+    """단일 청크 품질 점검 (preview / 청크뷰어 용, 경량).
+
+    반환: {"quality_score": float(0~1), "issues": list[str], "blocked": bool}
+    """
+    from .chunker import estimate_tokens
+    issues: list[str] = []
+    body = (text or "").strip()
+    score = 1.0
+    if not body:
+        issues.append("empty")
+        score -= 0.5
+    elif len(body) < 30:
+        issues.append("too_short")
+        score -= 0.2
+    toks = estimate_tokens(body)
+    max_tokens = getattr(settings, "ingest_chunk_max_tokens", 512)
+    if toks > max_tokens:
+        issues.append("oversize")
+        score -= 0.3
+    viol = _theology_violations(body)
+    if viol:
+        issues.extend(viol)
+        score -= 0.4
+    score = max(0.0, min(1.0, score))
+    return {
+        "quality_score": round(score, 2),
+        "issues": issues,
+        "blocked": "hard_block" in viol,
+    }
+
+
 def _normalize_for_hash(text: str) -> str:
     """중복 판정용 정규화 — 공백·문장부호 차이 무시."""
     return re.sub(r"\s+", "", re.sub(r"[^\w가-힣]", "", text))

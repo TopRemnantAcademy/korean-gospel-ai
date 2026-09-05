@@ -148,8 +148,9 @@ def create_new_version(
     who: str = "admin",
 ) -> DocumentVersion:
     """기존 문서에 새 버전 추가 (재업로드)."""
-    last_num = max((v.version_number for v in doc.versions), default=0)
-    base_title = title or sorted(doc.versions, key=lambda v: -v.version_number)[0].title
+    versions = sorted(doc.versions, key=lambda v: -v.version_number)
+    last_num = versions[0].version_number if versions else 0
+    base_title = title or (versions[0].title if versions else doc.doc_key)
 
     v = DocumentVersion(
         doc_id=doc.doc_id,
@@ -247,8 +248,8 @@ def validate_version(session: Session, *, version: DocumentVersion, who: str = "
 
 
 def archive_document(session: Session, *, doc: Document, who: str = "admin"):
-    from datetime import datetime
-    doc.archived_at = datetime.now(datetime.UTC)
+    from datetime import datetime, timezone
+    doc.archived_at = datetime.now(timezone.utc)
     for v in doc.versions:
         if v.state == DocVersionState.published.value:
             v.state = DocVersionState.archived.value
@@ -259,8 +260,24 @@ def archive_document(session: Session, *, doc: Document, who: str = "admin"):
     )
 
 
-def get_effective_body(version: DocumentVersion) -> str:
-    """body_patch 가 있으면 그것, 없으면 artifact의 추출 텍스트."""
+def get_effective_body(version: DocumentVersion, session: Session | None = None) -> str:
+    """body_patch 가 있으면 그것, 없으면 artifact의 추출 텍스트.
+
+    version.artifact 는 lazy 관계라 세션이 닫힌 상태(detached)에서 접근하면
+    DetachedInstanceError 가 난다. 가능하면 인자로 받은 세션 또는 첨부 세션을
+    사용해 artifact 를 명시적으로 조회한다(항상 로드된 상태 보장).
+    """
     if version.body_patch:
         return version.body_patch
-    return version.artifact.extracted_text
+    if session is None:
+        from sqlalchemy import inspect as _inspect
+
+        session = _inspect(version).session
+    if session is not None:
+        art = session.get(SourceArtifact, version.artifact_id)
+        if art is not None:
+            return art.extracted_text or ""
+    # 폴백: 첨부 세션이 없으면 이미 로드된 관계 사용 (detached+미로드 시 예외 가능)
+    if version.artifact is not None:
+        return version.artifact.extracted_text or ""
+    return ""

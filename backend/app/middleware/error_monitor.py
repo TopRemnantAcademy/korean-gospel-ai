@@ -25,6 +25,16 @@ _CRIT_MS = 30_000     # 30초 이상 → CRITICAL
 # 노이즈 경로 제외 (정적 리소스 등)
 _SKIP_PREFIXES = ("/docs", "/openapi", "/favicon")
 
+# 백그라운드 태스크 참조 보관 — GC 방지
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_bg_task(coro) -> None:
+    """asyncio.create_task 참조를 보관하여 예기치 않은 GC 를 방지."""
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
 
 async def _write_error_log(
     *,
@@ -41,8 +51,8 @@ async def _write_error_log(
 ) -> None:
     """DB에 에러 로그 1건 저장. 실패해도 예외를 외부로 전파하지 않는다."""
     try:
-        from ..db import get_session
         from ..models.orm import AppErrorLog
+        from ..logging_setup import scrub_secrets
 
         row = AppErrorLog(
             level=level,
@@ -50,8 +60,10 @@ async def _write_error_log(
             path=path[:200],
             status_code=status_code,
             error_type=(error_type or "")[:120],
-            error_message=(error_message or "")[:2000],
-            traceback=traceback_str[:5000] if traceback_str else None,
+            # P10-7 (P2 보안): 예외 메시지/트레이스백에 API 키·토큰·DB 비밀번호 등이
+            # 들어갈 수 있으므로 저장 전 마스킹.
+            error_message=scrub_secrets((error_message or ""))[:2000],
+            traceback=scrub_secrets(traceback_str)[:5000] if traceback_str else None,
             duration_ms=duration_ms,
             request_id=(request_id or "")[:40],
             client_ip=(client_ip or "")[:50],
@@ -94,7 +106,7 @@ class ErrorMonitorMiddleware(BaseHTTPMiddleware):
             exc_tb = tb_module.format_exc()
             exc_type = type(exc).__name__
             duration_ms = int((time.time() - t0) * 1000)
-            asyncio.create_task(_write_error_log(
+            _spawn_bg_task(_write_error_log(
                 level="CRITICAL",
                 method=method, path=path, status_code=500,
                 duration_ms=duration_ms,
@@ -117,7 +129,7 @@ class ErrorMonitorMiddleware(BaseHTTPMiddleware):
 
         if status >= 500:
             # HTTP 에러 응답 (예외는 위에서 처리됨, 여기는 route가 반환한 500)
-            asyncio.create_task(_write_error_log(
+            _spawn_bg_task(_write_error_log(
                 level="ERROR",
                 method=method, path=path, status_code=status,
                 duration_ms=duration_ms,
@@ -126,7 +138,7 @@ class ErrorMonitorMiddleware(BaseHTTPMiddleware):
                 request_id=request_id, client_ip=client_ip,
             ))
         elif duration_ms >= _CRIT_MS:
-            asyncio.create_task(_write_error_log(
+            _spawn_bg_task(_write_error_log(
                 level="CRITICAL",
                 method=method, path=path, status_code=status,
                 duration_ms=duration_ms,
@@ -141,7 +153,7 @@ class ErrorMonitorMiddleware(BaseHTTPMiddleware):
             except Exception:
                 pass
         elif duration_ms >= _SLOW_MS:
-            asyncio.create_task(_write_error_log(
+            _spawn_bg_task(_write_error_log(
                 level="SLOW",
                 method=method, path=path, status_code=status,
                 duration_ms=duration_ms,

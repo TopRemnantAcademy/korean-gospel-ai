@@ -53,6 +53,13 @@ async def classify_user_signal(text: str) -> dict:
     """DeepSeek로 사용자 발화에서 신호 추출.
     Returns {emotional_state, journey_hint, faith_hint, urgency, key_topics[]}.
     """
+    # Fast-path: 8자 미만이고 분류/상담 관심 키워드가 없으면 LLM 호출 생략 후 즉시 {} 반환
+    clean_text = text.strip()
+    if len(clean_text) < 8:
+        keywords = {"구원", "예수", "하나님", "교회", "의심", "믿음", "천국", "지옥", "죽음", "죄", "회개", "영접", "확신", "그리스도", "성경", "불안", "고민", "사탄", "천사", "마귀", "힘들", "슬퍼", "화나", "짜증", "외로", "우울", "자살", "싫어", "아파"}
+        if not any(kw in clean_text for kw in keywords):
+            return {}
+
     sys_prompt = """당신은 사용자 발화를 분석하여 영적/정서적 상태를 추출하는 분석가입니다.
 추출할 필드:
 - emotional_state: calm, anxious, grieving, curious, hopeful, distressed 중 하나

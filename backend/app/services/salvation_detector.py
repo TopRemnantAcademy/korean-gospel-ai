@@ -12,10 +12,11 @@ LLM 호출 실패(키 없음 포함) 시 graceful skip — 기존 상태 유지.
 # Status: COMPLETED
 # =============================================================================
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,13 @@ def _build_detection_prompt(text: str, current_status: str) -> str:
 
 async def detect_salvation_signal(text: str, current_status: str) -> SalvationSignal:
     """사용자 발화에서 구원 신호 감지. LLM 실패 시 _NULL_SIGNAL 반환."""
+    # Fast-path: 8자 미만이고 신앙/구원 핵심 단어가 없으면 LLM 호출 생략 후 null 반환
+    clean_text = text.strip()
+    if len(clean_text) < 8:
+        salvation_keywords = {"구원", "예수", "하나님", "교회", "의심", "믿음", "천국", "지옥", "죽음", "죄", "회개", "영접", "확신", "그리스도", "성경", "불안", "고민", "사탄", "천사", "마귀"}
+        if not any(kw in clean_text for kw in salvation_keywords):
+            return _NULL_SIGNAL
+
     try:
         from .llm.fallback import chat_with_fallback
         from .llm.base import Message
@@ -144,7 +152,7 @@ async def transition_status(sub_id: str, signal: SalvationSignal) -> None:
     from ..db import get_session
     from ..models.orm import Subscriber, SalvationJourney
 
-    try:
+    def _transition_sync() -> None:
         with get_session() as s:
             sub = s.query(Subscriber).filter(
                 Subscriber.subscriber_id == sub_id
@@ -157,12 +165,10 @@ async def transition_status(sub_id: str, signal: SalvationSignal) -> None:
             if not new_status:
                 return
 
-            # 구원 상태 갱신
             sub.salvation_status = new_status
             sub.salvation_confidence = signal.confidence
-            sub.salvation_last_signal_at = datetime.now(datetime.UTC)
+            sub.salvation_last_signal_at = datetime.now(timezone.utc)
 
-            # 여정 기록
             s.add(SalvationJourney(
                 subscriber_id=sub_id,
                 from_status=current,
@@ -172,5 +178,7 @@ async def transition_status(sub_id: str, signal: SalvationSignal) -> None:
                 confidence=signal.confidence,
             ))
 
+    try:
+        await asyncio.to_thread(_transition_sync)
     except Exception as e:
         logger.warning("transition_status 실패 (sub_id=%s): %s", sub_id, e)

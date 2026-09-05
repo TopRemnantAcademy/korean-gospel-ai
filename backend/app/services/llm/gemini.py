@@ -47,10 +47,7 @@ class GeminiLLM(BaseLLM):
             system_instruction=system if system else None,
         )
 
-        # SDK 의 generate_content 는 동기 메서드라서 to_thread 로 비동기화
-        import asyncio
-        resp = await asyncio.to_thread(
-            self._client.models.generate_content,
+        resp = await self._client.aio.models.generate_content(
             model=self._model,
             contents=contents,
             config=config,
@@ -82,7 +79,6 @@ class GeminiLLM(BaseLLM):
     ):
         """Gemini streaming - 글자가 흘러나오는 효과."""
         from google.genai import types
-        import asyncio
 
         contents = []
         for m in messages:
@@ -95,16 +91,10 @@ class GeminiLLM(BaseLLM):
             system_instruction=system if system else None,
         )
 
-        # SDK는 sync iterator - to_thread로 청크 받기
-        def _iter():
-            return self._client.models.generate_content_stream(
-                model=self._model, contents=contents, config=config,
-            )
-        try:
-            stream_iter = await asyncio.to_thread(_iter)
-            for chunk in stream_iter:
-                text = getattr(chunk, "text", None)
-                if text:
-                    yield text
-        except Exception as e:
-            yield f"[stream error: {e}]"
+        response_stream = self._client.aio.models.generate_content_stream(
+            model=self._model, contents=contents, config=config,
+        )
+        async for chunk in response_stream:
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text

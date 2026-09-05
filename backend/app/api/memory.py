@@ -4,7 +4,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 
-from ..config import settings
 from ..models.schemas import FeedbackIn
 from ..services import memory_service
 
@@ -12,11 +11,7 @@ from ..services import memory_service
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
-def _check_admin(authorization):
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=403, detail="missing admin token")
-    if authorization.split(" ", 1)[1].strip() != settings.admin_api_key:
-        raise HTTPException(status_code=403, detail="invalid admin token")
+from .auth import check_admin as _check_admin
 
 
 @router.get("/list")

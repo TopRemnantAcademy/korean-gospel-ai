@@ -1,26 +1,10 @@
-"""E-B2 + 무료체험 Rate Limit 미들웨어.
-
-무료 티어 정책 (guest):
-  - 신규 사용자 → 3일 무료 체험 자동 부여 (trial_expires_at = first_seen_at + 3d)
-  - 체험 중 : 3시간당 FREE_TRIAL_3H_LIMIT 회 쿼리 (기본 10회)
-  - 체험 만료: 429 + trial_expired 코드 → 프론트엔드에서 결제 페이지 안내
-
-유료 회원 정책 (member | supporter):
-  - 3시간 할당량 없음
-  - 분당 MAX_MEMBER_RPM 회 (기본 60)
-
-봇 차단:
-  - flagged_as_bot=True → 즉시 403
-  - 동일 IP 30분 내 5개+ 다른 sub_id → IP 1시간 차단
-  - IP 분당 30 req 초과 → 15분 차단
-
-Rate limit 대상 경로: /chat, /chat/stream
-"""
 from __future__ import annotations
 
+import random
 import time
-from datetime import datetime, timedelta
 from typing import Callable, Optional
+
+import asyncio
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -28,266 +12,204 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..config import settings
 
-# ─── 설정값 ────────────────────────────────────────────────────────────────────
-FREE_TRIAL_DAYS = 3          # 무료체험 일수
-FREE_TRIAL_3H_LIMIT = 10     # 3시간당 최대 쿼리 수 (무료)
-FREE_TRIAL_WINDOW_SEC = 10_800  # 3시간 = 10800초
+# 환경변수(RATE_LIMIT_ENABLED / RATE_LIMIT_PER_MINUTE)로 제어. 미설정 시 기본 60 RPM.
+MAX_IP_RPM = settings.rate_limit_per_minute
+MAX_IP_RPH = settings.rate_limit_per_minute * 10
+IP_BLOCK_MINUTES = 15
 
-MAX_GUEST_IP_RPM = 30        # IP 분당 최대 (비회원)
-MAX_GUEST_IP_RPH = 200       # IP 시간당 최대 (비회원)
-MAX_MEMBER_RPM = 60          # 유료 회원 분당 최대
+# 속도 제한 적용 경로 (LLM 비용/남용 표면): 채팅 + 인증 + ingest + admin + documents (P4 #3)
+_RATE_PREFIXES = ("/chat", "/auth", "/rag", "/admin", "/documents", "/support")
 
-IP_BLOCK_MINUTES = 15        # IP 초과 시 차단 시간
-MULTI_SUB_BLOCK_HOURS = 1    # 다계정 의심 IP 차단 시간
-MULTI_SUB_THRESHOLD = 5      # 동일 IP 30분 내 이 수 이상 sub_id → 차단
+_buckets: dict[str, list[float]] = {}
+_blocked_ips: dict[str, float] = {}
+# [PERF] 버킷 키 상한 — 초과 시 만료/비활성 키 정리로 메모리 무한성장 방지
+_BUCKETS_MAX = 10000
 
-# ─── 인메모리 버킷 ─────────────────────────────────────────────────────────────
-_buckets: dict[str, list[float]] = {}      # {key: [timestamps]}
-_blocked_ips: dict[str, float] = {}        # {ip: unblock_at}
-_ip_subs: dict[str, dict[str, float]] = {} # {ip: {sub_id: last_seen_ts}}
-_3h_buckets: dict[str, list[float]] = {}   # {sub_id: [timestamps]} — 3h 윈도우
+# Redis 공유 버킷 (다중 worker 일관성). 미설정 시 프로세스 내 버킷 사용.
+_rl_redis: Optional[object] = None
+_rl_redis_tried = False
 
-# 구독 정보 캐시 (5분 TTL): {sub_id: (tier, trial_expires_at, flagged, cached_at)}
-_sub_cache: dict[str, tuple] = {}
-_SUB_CACHE_TTL = 300
+# 백그라운드 태스크 참조 보관 — GC 방지
+_bg_tasks: set[asyncio.Task] = set()
 
 
-# ─── 헬퍼 ──────────────────────────────────────────────────────────────────────
+def _spawn_bg_task(coro) -> None:
+    """asyncio.create_task 참조를 보관하여 예기치 않은 GC 를 방지."""
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+def _get_redis():
+    """Redis 클라이언트를 한 번만 생성해 캐시(연결 풀 재사용). 실패 시 None."""
+    global _rl_redis, _rl_redis_tried
+    if _rl_redis_tried:
+        return _rl_redis
+    _rl_redis_tried = True
+    url = getattr(settings, "redis_url", None)
+    if not url:
+        return None
+    try:
+        import redis
+
+        _rl_redis = redis.Redis.from_url(url, socket_timeout=1)
+        return _rl_redis
+    except Exception:
+        return None
+
+
+def _real_client_ip(request: Request) -> str:
+    """실제 클라이언트 IP (P4 #3).
+
+    신뢰 프록시 뒤에서는 X-Forwarded-For 의 **가장 오른쪽 hop** 을 사용한다.
+    XFF 형식은 `client, proxy1, proxy2` 이며, 신뢰 프록시가 수신한 요청 IP 를
+    끝에 append 하므로 맨 **왼쪽** hop 은 공격자가 임의로 조작할 수 있어 신뢰하면 안 된다
+    (매번 다른 XFF 를 보내면 익명 할당량/rate limit 이 무제한 우회됨).
+    단일 신뢰 프록시(nginx 등) 환경이 아니면 rate_limit_trust_proxy=False 권장.
+    """
+    if getattr(settings, "rate_limit_trust_proxy", True):
+        xff = request.headers.get("X-Forwarded-For")
+        if xff:
+            hops = [h.strip() for h in xff.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
+        xri = request.headers.get("X-Real-IP")
+        if xri:
+            return xri.strip()
+    return (request.client.host if request.client else "unknown") or "unknown"
+
+
 def _clean(ts_list: list[float], window: float) -> list[float]:
     cutoff = time.time() - window
     return [t for t in ts_list if t >= cutoff]
 
 
-def _count(key: str, window: float, store: dict) -> int:
-    ts = _clean(store.get(key, []), window)
-    store[key] = ts
+def _redis_count(key: str, window: float) -> int:
+    r = _get_redis()
+    if r is None:
+        return 0
+    now = time.time()
+    r.zremrangebyscore(key, 0, now - window)  # 만료 항목 정리
+    return r.zcard(key)
+
+
+def _redis_hit(key: str, window: float) -> None:
+    r = _get_redis()
+    if r is None:
+        return
+    now = time.time()
+    r.zremrangebyscore(key, 0, now - window)
+    r.zadd(key, {f"{now}:{random.random()}": now})
+    r.expire(key, int(window) + 5)
+
+
+def _count(key: str, window: float) -> int:
+    r = _get_redis()
+    if r is not None:
+        try:
+            return _redis_count(key, window)
+        except Exception:
+            pass
+    ts = _clean(_buckets.get(key, []), window)
+    _buckets[key] = ts
     return len(ts)
 
 
-def _hit(key: str, store: dict, max_keep: int = 500) -> None:
-    ts = store.get(key, [])
+def _hit(key: str, window: float, max_keep: int = 1000) -> None:
+    r = _get_redis()
+    if r is not None:
+        try:
+            _redis_hit(key, window)
+            return
+        except Exception:
+            pass
+    ts = _buckets.get(key, [])
+    is_new = not ts
     ts.append(time.time())
-    store[key] = ts[-max_keep:]
+    _buckets[key] = ts[-max_keep:]
+    # [PERF] 새 키 추가로 상한 초과 시에만 정리(정리 후에도 초과하면 오래된 키 제거)
+    if is_new and len(_buckets) > _BUCKETS_MAX:
+        _global_cleanup()
+        while len(_buckets) > _BUCKETS_MAX:
+            _buckets.pop(next(iter(_buckets)))
+
+
+def _global_cleanup() -> None:
+    """모든 속도 제한 딕셔너리에서 만료된 항목 정리.
+
+    ⚠️ 순회 중 딕셔너리 크기를 변경하면 RuntimeError 가 발생하므로,
+    삭제 대상 key 를 먼저 복사(list)한 뒤 순회한다.
+    """
+    now = time.time()
+    expired_ips = [ip for ip, unblock_at in _blocked_ips.items() if now >= unblock_at]
+    for ip in expired_ips:
+        _blocked_ips.pop(ip, None)
+    # [PERF] 빈 키 + 1시간(hour 윈도우) 이상 활동 없는 키 제거 → 메모리 무한성장 방지
+    stale_keys = [k for k, v in _buckets.items() if not v or v[-1] < now - 3600]
+    for k in stale_keys:
+        _buckets.pop(k, None)
 
 
 def _is_rate_path(path: str) -> bool:
-    return path.startswith("/chat")
+    return any(path.startswith(p) for p in _RATE_PREFIXES)
 
 
-def _track_ip_sub(ip: str, sub_id: str) -> int:
-    now = time.time()
-    cutoff = now - 1800  # 30분
-    subs = {k: v for k, v in (_ip_subs.get(ip) or {}).items() if v >= cutoff}
-    subs[sub_id] = now
-    _ip_subs[ip] = subs
-    return len(subs)
-
-
-# ─── DB 조회 (캐시 포함) ────────────────────────────────────────────────────────
-def _get_sub_info(sub_id: str) -> tuple[str, Optional[datetime], bool]:
-    """(subscription_tier, trial_expires_at, flagged_as_bot). 5분 캐시."""
-    if sub_id == "anon":
-        return "guest", None, False
-
-    now = time.time()
-    cached = _sub_cache.get(sub_id)
-    if cached and now - cached[3] < _SUB_CACHE_TTL:
-        return cached[0], cached[1], cached[2]
-
-    try:
-        from ..db import get_session
-        from ..models.orm import Subscriber
-        with get_session() as s:
-            row = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
-            if row:
-                tier = row.subscription_tier or "guest"
-                trial_exp = row.trial_expires_at
-                flagged = bool(row.flagged_as_bot)
-                _sub_cache[sub_id] = (tier, trial_exp, flagged, now)
-                return tier, trial_exp, flagged
-    except Exception:
-        pass
-
-    return "guest", None, False
-
-
-# ─── 3시간 윈도우 쿼리 카운터 ──────────────────────────────────────────────────
-def _count_3h(sub_id: str) -> int:
-    ts = _clean(_3h_buckets.get(sub_id, []), FREE_TRIAL_WINDOW_SEC)
-    _3h_buckets[sub_id] = ts
-    return len(ts)
-
-
-def _hit_3h(sub_id: str) -> None:
-    ts = _3h_buckets.get(sub_id, [])
-    ts.append(time.time())
-    _3h_buckets[sub_id] = ts[-200:]
-
-
-def _next_3h_reset(sub_id: str) -> int:
-    """현재 윈도우가 리셋되기까지 남은 초."""
-    ts = _clean(_3h_buckets.get(sub_id, []), FREE_TRIAL_WINDOW_SEC)
-    if not ts:
-        return 0
-    oldest = min(ts)
-    return max(0, int(oldest + FREE_TRIAL_WINDOW_SEC - time.time()))
-
-
-# ─── 미들웨어 ──────────────────────────────────────────────────────────────────
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if not settings.rate_limit_enabled:
-            return await call_next(request)
         if not _is_rate_path(request.url.path):
             return await call_next(request)
 
-        ip = (request.client.host if request.client else "unknown") or "unknown"
-        sub_id = request.query_params.get("user_id") or "anon"
+        # RATE_LIMIT_ENABLED=false 면 속도 제한 비활성화 (env로 토글)
+        if not settings.rate_limit_enabled:
+            return await call_next(request)
 
-        # ── 1) IP 차단 확인 ───────────────────────────────────────────────────
+        # 확률적 전역 정리 (1% 확률)
+        if random.random() < 0.01:
+            _global_cleanup()
+
+        ip = _real_client_ip(request)
         unblock_at = _blocked_ips.get(ip, 0)
-        if time.time() < unblock_at:
+        now = time.time()
+        if now < unblock_at:
             return JSONResponse(
                 status_code=429,
+                headers={"Retry-After": str(int(unblock_at - now))},
                 content={
                     "error": "ip_blocked",
-                    "retry_after_seconds": int(unblock_at - time.time()),
-                    "message": "너무 많은 요청이 감지되었습니다. 잠시 후 다시 시도해주세요.",
+                    "retry_after_seconds": int(unblock_at - now),
+                    "message": "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
                 },
             )
 
-        # ── 2) 구독 정보 조회 (캐시) ──────────────────────────────────────────
-        tier, trial_exp, flagged = _get_sub_info(sub_id)
-
-        # ── 3) 봇 플래그 → 즉시 차단 ─────────────────────────────────────────
-        if flagged:
-            return JSONResponse(
-                status_code=403,
-                content={
-                    "error": "account_suspended",
-                    "message": "계정이 정지되었습니다. 문의: support@gospel-ai.kr",
-                },
-            )
-
-        is_paid = tier in ("member", "supporter")
-
-        # ── 4) 무료체험 만료 확인 (guest만) ──────────────────────────────────
-        if not is_paid and sub_id != "anon" and trial_exp is not None:
-            if datetime.now(datetime.UTC) > trial_exp:
-                return JSONResponse(
-                    status_code=402,
-                    content={
-                        "error": "trial_expired",
-                        "message": (
-                            "3일 무료 체험이 종료되었습니다. "
-                            "회원제를 구매하면 계속 이용하실 수 있어요."
-                        ),
-                        "expired_at": trial_exp.isoformat(),
-                    },
-                )
-
-        # ── 5) IP 분당/시간당 제한 (비회원) ──────────────────────────────────
-        ip_min_key = f"ip_min:{ip}"
-        ip_hr_key = f"ip_hr:{ip}"
-
-        if not is_paid:
-            ip_min = _count(ip_min_key, 60, _buckets)
-            ip_hr = _count(ip_hr_key, 3600, _buckets)
-
-            if ip_min >= MAX_GUEST_IP_RPM:
-                _blocked_ips[ip] = time.time() + IP_BLOCK_MINUTES * 60
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "error": "rate_limit_exceeded",
-                        "blocked_minutes": IP_BLOCK_MINUTES,
-                        "message": f"{IP_BLOCK_MINUTES}분 후 다시 시도해주세요.",
-                    },
-                )
-            if ip_hr >= MAX_GUEST_IP_RPH:
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "error": "rate_limit_exceeded",
-                        "message": "1시간 후 다시 시도해주세요.",
-                    },
-                )
-
-        # ── 6) 유료 회원 분당 제한 ───────────────────────────────────────────
-        if is_paid:
-            sub_min = _count(f"sub_min:{sub_id}", 60, _buckets)
-            if sub_min >= MAX_MEMBER_RPM:
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "error": "rate_limit_exceeded",
-                        "message": "잠시 후 다시 시도해주세요. (분당 요청 한도)",
-                    },
-                )
-
-        # ── 7) 무료체험 3시간 쿼리 할당량 ────────────────────────────────────
-        if not is_paid and sub_id != "anon":
-            q_3h = _count_3h(sub_id)
-            if q_3h >= FREE_TRIAL_3H_LIMIT:
-                reset_secs = _next_3h_reset(sub_id)
-                reset_min = max(1, reset_secs // 60)
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "error": "trial_quota_exceeded",
-                        "message": (
-                            f"무료 체험 할당량({FREE_TRIAL_3H_LIMIT}회/3시간)을 초과했습니다. "
-                            f"약 {reset_min}분 후 다시 이용 가능합니다."
-                        ),
-                        "retry_after_seconds": reset_secs,
-                        "quota": FREE_TRIAL_3H_LIMIT,
-                        "window_hours": 3,
-                    },
-                )
-
-        # ── 8) 다계정 의심 (동일 IP 30분 내 여러 sub_id) ─────────────────────
-        unique_subs = _track_ip_sub(ip, sub_id)
-        if unique_subs >= MULTI_SUB_THRESHOLD:
-            _blocked_ips[ip] = time.time() + MULTI_SUB_BLOCK_HOURS * 3600
-            await _flag_ip_subs_as_bot(ip)
+        min_key = f"ip_min:{ip}"
+        hr_key = f"ip_hr:{ip}"
+        if _count(min_key, 60) >= MAX_IP_RPM:
+            _blocked_ips[ip] = now + IP_BLOCK_MINUTES * 60
             return JSONResponse(
                 status_code=429,
+                headers={"Retry-After": str(IP_BLOCK_MINUTES * 60)},
                 content={
-                    "error": "suspicious_activity",
-                    "blocked_hours": MULTI_SUB_BLOCK_HOURS,
-                    "message": "비정상 접속 패턴이 감지되었습니다.",
+                    "error": "rate_limit_exceeded",
+                    "blocked_minutes": IP_BLOCK_MINUTES,
+                    "message": f"{IP_BLOCK_MINUTES}분 후 다시 시도해주세요.",
+                },
+            )
+        if _count(hr_key, 3600) >= MAX_IP_RPH:
+            return JSONResponse(
+                status_code=429,
+                headers={"Retry-After": str(3600)},
+                content={
+                    "error": "rate_limit_exceeded",
+                    "message": "1시간 후 다시 시도해주세요.",
                 },
             )
 
-        # ── 9) 히트 기록 ─────────────────────────────────────────────────────
-        _hit(ip_min_key, _buckets)
-        _hit(ip_hr_key, _buckets)
-        if not is_paid and sub_id != "anon":
-            _hit_3h(sub_id)
-
-        return await call_next(request)
-
-
-# ─── 봇 플래그 처리 ────────────────────────────────────────────────────────────
-async def _flag_ip_subs_as_bot(ip: str) -> None:
-    """동일 IP에서 발견된 모든 sub_id를 자동 차단."""
-    try:
-        from ..db import get_session
-        from ..models.orm import Subscriber
-        subs = list((_ip_subs.get(ip) or {}).keys())
-        with get_session() as s:
-            for sid in subs:
-                row = s.query(Subscriber).filter(Subscriber.subscriber_id == sid).first()
-                if row:
-                    row.flagged_as_bot = True
-                    row.bot_score = 1.0
-                # 캐시 무효화
-                _sub_cache.pop(sid, None)
-    except Exception:
-        pass
-
-
-# ─── 구독 업그레이드 헬퍼 (관리자 API에서 호출) ────────────────────────────────
-def invalidate_sub_cache(sub_id: str) -> None:
-    """구독 정보 변경 시 캐시 강제 갱신."""
-    _sub_cache.pop(sub_id, None)
+        _hit(min_key, 60)
+        _hit(hr_key, 3600)
+        response = await call_next(request)
+        # 클라이언트가 자율 제어할 수 있도록 표준 Rate-Limit 헤더 부여
+        response.headers["X-RateLimit-Limit"] = str(MAX_IP_RPM)
+        response.headers["X-RateLimit-Remaining"] = str(
+            max(0, MAX_IP_RPM - _count(min_key, 60))
+        )
+        return response

@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 from typing import Sequence
 
-import httpx
 import numpy as np
 
 from .base import BaseEmbedder
@@ -46,12 +45,13 @@ class HfInferenceEmbedder(BaseEmbedder):
         payload = {"inputs": texts, "options": {"wait_for_model": True}}
 
         try:
-            with httpx.Client(timeout=60.0) as client:
-                response = client.post(self._api_url, headers=self._headers, json=payload)
-                if response.status_code != 200:
-                    log.error(f"HF Inference API Error [{response.status_code}]: {response.text}")
-                    response.raise_for_status()
-                return response.json()
+            from ...connections import connections
+            client = connections.http_client()
+            response = client.post(self._api_url, headers=self._headers, json=payload, timeout=60.0)
+            if response.status_code != 200:
+                log.error(f"HF Inference API Error [{response.status_code}]: {response.text}")
+                response.raise_for_status()
+            return response.json()
         except Exception as e:
             log.exception(f"Failed to fetch embeddings from HF Inference API: {e}")
             raise

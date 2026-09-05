@@ -13,7 +13,16 @@ class BgeM3Embedder(BaseEmbedder):
 
     def __init__(self, model_id: str | None = None):
         from sentence_transformers import SentenceTransformer
-        self._model = SentenceTransformer(model_id or self.model_id)
+        from ...config import settings
+
+        # Windows HF 캐시 심링크(junction) 깨짐 우회:
+        # BGE_M3_MODEL_PATH(실제 파일 복사본 로컬 경로)가 설정돼 있으면 우선 사용.
+        effective = (
+            model_id
+            or getattr(settings, "bge_m3_model_path", None)
+            or self.model_id
+        )
+        self._model = SentenceTransformer(effective)
         self._dim = self._model.get_sentence_embedding_dimension()
 
     @property

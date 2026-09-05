@@ -2,26 +2,32 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
+
+from qdrant_client import models as qm
 
 from ..config import settings
 from ..connections import connections
+from ..db import get_session
 from ..services.vector_store import _make_client
+from ..services.embedding.factory import get_embedder
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _check_admin(authorization):
-    if settings.admin_api_key == "change-me":
-        raise HTTPException(
-            status_code=503,
-            detail="관리자 API 비활성화됨 — .env 파일에 ADMIN_API_KEY 를 설정하고 서버를 재시작하세요.",
-        )
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=403, detail="missing admin token")
-    token = authorization.split(" ", 1)[1].strip()
-    if token != settings.admin_api_key:
-        raise HTTPException(status_code=403, detail="invalid admin token")
+from .auth import check_admin as _check_admin
+
+import logging
+
+_logger = logging.getLogger(__name__)
+
+
+def _safe_err(label: str, e: Exception) -> str:
+    """관리자 엔드포인트라도 내부 예외 문자열(호스트/경로/SQL)을 클라이언트에
+    노출하지 않고 서버 로그에만 기록한다."""
+    _logger.warning("[admin] %s 실패: %s", label, e)
+    return "내부 오류가 발생했습니다 (서버 로그를 확인하세요)"
 
 
 @router.get("/health")
@@ -30,6 +36,106 @@ def health():
     return {
         "ok": True,
         "version": "0.3.1",
+    }
+
+
+@router.get("/services-health")
+def services_health(authorization=Header(default=None)):
+    """각 주요 기능의 헬스 체크.
+
+    반환: {
+      "services": {
+        "documents": {"ok": bool, "message": str},
+        "search": {"ok": bool, "message": str},
+        "memory": {"ok": bool, "message": str},
+        "glossary": {"ok": bool, "message": str},
+        "chat": {"ok": bool, "message": str},
+        "jobs": {"ok": bool, "message": str},
+      },
+      "overall": "healthy" | "degraded" | "unavailable"
+    }
+    """
+    _check_admin(authorization)
+    services = {}
+
+    # 1. Documents (DB 접근)
+    try:
+        from ..models.orm import Document
+        with get_session() as s:
+            count = s.query(Document).count()
+        services["documents"] = {"ok": True, "message": f"{count}개 자료"}
+    except Exception as e:
+        services["documents"] = {"ok": False, "message": _safe_err("documents", e)}
+
+    # 2. Search (Qdrant 벡터 DB)
+    try:
+        client, _is_server = _make_client()
+        if client:
+            cols = client.get_collections().collections
+            col_count = len(cols) if cols else 0
+            services["search"] = {"ok": True, "message": f"{col_count}개 인덱스"}
+        else:
+            services["search"] = {"ok": False, "message": "Qdrant 연결 불가"}
+    except Exception as e:
+        services["search"] = {"ok": False, "message": _safe_err("search", e)}
+
+    # 3. Memory/Interactions (DB 접근)
+    try:
+        with get_session() as s:
+            from ..models.orm import Interaction
+            count = s.query(Interaction).count()
+        services["memory"] = {"ok": True, "message": f"{count}개 기록"}
+    except Exception as e:
+        services["memory"] = {"ok": False, "message": _safe_err("memory", e)}
+
+    # 4. 번역 용어집 (JSON 단일 진실공급원)
+    try:
+        from ..services.enhanced_rag.glossary_manager import term_count
+        count = term_count()
+        services["glossary"] = {
+            "ok": True,
+            "message": f"번역 용어집 {count}개 (KO→ZH+EN)",
+        }
+    except Exception as e:
+        services["glossary"] = {"ok": False, "message": _safe_err("glossary", e)}
+
+    # 5. Chat (LLM 연결 상태 체크)
+    try:
+        conn_status = connections.status()
+        active_llm = conn_status.get("active_llm", "unknown")
+        llm_state = conn_status.get(active_llm.lower() if active_llm else "unknown", "missing")
+        if llm_state in ("ok", "active"):
+            services["chat"] = {"ok": True, "message": f"LLM: {active_llm}"}
+        else:
+            services["chat"] = {"ok": False, "message": f"LLM 미설정 또는 오류: {active_llm}"}
+    except Exception as e:
+        services["chat"] = {"ok": False, "message": _safe_err("chat", e)}
+
+    # 6. Jobs (백그라운드 작업 큐)
+    try:
+        with get_session() as s:
+            from ..models.orm import BackgroundJob
+            pending = s.query(BackgroundJob).filter(BackgroundJob.status == "pending").count()
+            running = s.query(BackgroundJob).filter(BackgroundJob.status == "running").count()
+        services["jobs"] = {"ok": True, "message": f"대기중 {pending}, 실행중 {running}"}
+    except Exception as e:
+        services["jobs"] = {"ok": False, "message": _safe_err("jobs", e)}
+
+    # Overall 상태 판정
+    ok_count = sum(1 for s in services.values() if s["ok"])
+    total_count = len(services)
+    if ok_count == total_count:
+        overall = "healthy"
+    elif ok_count >= total_count * 0.5:
+        overall = "degraded"
+    else:
+        overall = "unavailable"
+
+    return {
+        "services": services,
+        "overall": overall,
+        "ok_count": ok_count,
+        "total_count": total_count,
     }
 
 
@@ -46,12 +152,12 @@ def list_collections(authorization=Header(default=None)):
     try:
         client, _is_server = _make_client()
     except Exception as e:
-        return {"collections": [], "warning": f"qdrant init failed: {type(e).__name__}: {str(e)[:200]}"}
+        return {"collections": [], "warning": _safe_err("qdrant_init", e)}
 
     try:
         col_list = client.get_collections().collections
     except Exception as e:
-        return {"collections": [], "warning": f"list failed: {type(e).__name__}: {str(e)[:200]}"}
+        return {"collections": [], "warning": _safe_err("qdrant_list", e)}
 
     cols = []
     for c in col_list:
@@ -74,46 +180,389 @@ def list_collections(authorization=Header(default=None)):
 
 
 
-# ----- Taxonomy (태그/시리즈/화자 통계) -----
-from collections import Counter
-from ..db import get_session
-from ..models.orm import Document, DocumentVersion, DocVersionState
 
 
-@router.get("/taxonomy")
-def taxonomy(authorization=Header(default=None)):
+@router.get("/chunks")
+def list_chunks(
+    authorization=Header(default=None),
+    collection: str | None = None,
+    limit: int = 25,
+    offset: str | None = None,
+):
+    """Qdrant 청크 브라우저 (임베디드/서버 모드 통합, 읽기 전용).
+
+    임베디드(local:) 모드에서도 백엔드 프로세스가 보유한 동일 Qdrant 인스턴스를
+    재사용하므로 잠금 충돌 없이 청크를 직접 조회할 수 있다. 벡터는 제외하고
+    페이로드(text·메타)만 반환한다. 관리자 전용.
+    """
     _check_admin(authorization)
-    tag_counter = Counter()
-    series_counter = Counter()
-    speaker_counter = Counter()
-    type_counter = Counter()
-    refs_counter = Counter()
-    with get_session() as s:
-        docs = s.query(Document).filter(Document.archived_at.is_(None)).all()
-        for d in docs:
-            type_counter[d.doc_type or "other"] += 1
-            if d.series: series_counter[d.series] += 1
-            if d.speaker: speaker_counter[d.speaker] += 1
-            for v in d.versions:
-                for t in (v.topic_tags or []):
-                    tag_counter[t] += 1
-                for r in (v.scripture_refs or []):
-                    refs_counter[r] += 1
-                break  # 최신 버전 하나만
-    def topn(c, n=50):
-        return [{"name": k, "count": v} for k, v in c.most_common(n)]
+    try:
+        client, _is_server = _make_client()
+    except Exception as e:
+        return {"points": [], "collections": [], "total": 0,
+                "warning": _safe_err("qdrant_init", e)}
+
+    try:
+        col_list = client.get_collections().collections
+    except Exception as e:
+        return {"points": [], "collections": [], "total": 0,
+                "warning": _safe_err("qdrant_list", e)}
+
+    collections = [c.name for c in col_list]
+    if not collections:
+        return {"points": [], "collections": [], "total": 0,
+                "warning": "Qdrant에 컬렉션이 없습니다."}
+
+    # 대상 컬렉션: 명시 지정 우선, 없으면 포인트가 가장 많은 컬렉션
+    if collection and collection in collections:
+        target = collection
+    else:
+        target = None
+        best = -1
+        for name in collections:
+            try:
+                cnt = client.count(collection_name=name).count
+            except Exception:
+                cnt = 0
+            if cnt > best:
+                best = cnt
+                target = name
+
+    limit = max(1, min(int(limit), 200))
+
+    # offset 은 Qdrant scroll 의 PointId 커서(int 또는 UUID 문자열) — 정수
+    # 인덱스(0,25,50...)가 아니다. "0" 또는 미제공 시 첫 페이지(None)로 처리.
+    scroll_offset = None
+    if offset not in (None, "", "0"):
+        scroll_offset = _coerce_point_id(offset)
+
+    try:
+        points, next_offset = client.scroll(
+            collection_name=target,
+            limit=limit,
+            offset=scroll_offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception as e:
+        return {"points": [], "collections": collections, "total": 0,
+                "collection": target, "warning": _safe_err("qdrant_scroll", e)}
+
+    total = 0
+    try:
+        total = client.count(collection_name=target).count
+    except Exception:
+        total = len(points)
+
+    out = []
+    for p in points:
+        payload = p.payload or {}
+        out.append({
+            "id": str(p.id),
+            "text": str(payload.get("text", "")),
+            "payload": payload,
+        })
+
     return {
-        "tags": topn(tag_counter),
-        "series": topn(series_counter),
-        "speakers": topn(speaker_counter),
-        "types": topn(type_counter),
-        "scripture_refs": topn(refs_counter),
+        "collection": target,
+        "collections": collections,
+        "total": total,
+        "points": out,
+        "limit": limit,
+        "offset": scroll_offset,
+        "next_offset": next_offset,
     }
 
 
+# ----- 청크 관리 전문 도구 (작업 CC): search / delete / patch / stats -----
+
+def _coerce_point_id(s: str):
+    """Qdrant point id 는 int 또는 UUID 문자열. Qdrant Client 는 str/int 만 허용하므로
+    UUID 도 문자열로 반환한다 (uuid.UUID 객체 전달 시 검증 오류)."""
+    try:
+        return int(s)
+    except (ValueError, TypeError):
+        return s
+
+
+def _resolve_target_collection(client, collection):
+    """list_chunks 와 동일 로직: 명시 지정 우선, 없으면 포인트 최다 컬렉션."""
+    try:
+        col_list = client.get_collections().collections
+    except Exception as e:
+        raise RuntimeError(_safe_err("qdrant_list", e))
+    collections = [c.name for c in col_list]
+    if not collections:
+        raise RuntimeError("Qdrant에 컬렉션이 없습니다.")
+    if collection and collection in collections:
+        return collection, collections
+    target = None
+    best = -1
+    for name in collections:
+        try:
+            cnt = client.count(collection_name=name).count
+        except Exception:
+            cnt = 0
+        if cnt > best:
+            best = cnt
+            target = name
+    return target, collections
+
+
+def _embedder_name_for_collection(collection: str) -> str:
+    """{prefix}_{embedder_name} 규칙에서 임베더 이름 추출 (prefix 무관)."""
+    try:
+        probe = settings.collection_name("__probe__")
+        prefix = probe.replace("__probe__", "")
+    except Exception:
+        prefix = ""
+    if prefix and collection.startswith(prefix):
+        return collection[len(prefix):]
+    return settings.embedder
+
+
+class _VecList:
+    @staticmethod
+    def to_list(vec):
+        return vec.tolist() if hasattr(vec, "tolist") else list(vec)
+
+
+class ChunkSearchRequest(BaseModel):
+    query: str
+    collection: str | None = None
+    limit: int = 10
+    with_vectors: bool = False
+
+
+class ChunkPatchRequest(BaseModel):
+    text: str | None = None
+    payload: dict | None = None   # 추가/수정할 메타 필드
+    reembed: bool = True          # text 변경 시 dense 벡터 재계산
+
+
+@router.post("/chunks/search")
+def search_chunks(body: ChunkSearchRequest, authorization=Header(default=None)):
+    """시맨틱 검색: 쿼리를 임베딩해 RAG가 실제로 반환하는 청크/점수 확인 (RAG 디버깅)."""
+    _check_admin(authorization)
+    if not body.query or not body.query.strip():
+        return {"points": [], "warning": "query가 비어있습니다."}
+    try:
+        client, _is_server = _make_client()
+    except Exception as e:
+        return {"points": [], "warning": _safe_err("qdrant_init", e)}
+    try:
+        target, collections = _resolve_target_collection(client, body.collection)
+    except Exception as e:
+        return {"points": [], "collections": [], "warning": str(e)}
+    embedder_name = _embedder_name_for_collection(target)
+    try:
+        emb = get_embedder(embedder_name)
+        vec = emb.embed_query(body.query.strip())
+    except Exception as e:
+        return {"points": [], "collections": collections, "collection": target,
+                "warning": _safe_err("embed", e)}
+    limit = max(1, min(int(body.limit), 50))
+    try:
+        resp = client.query_points(
+            collection_name=target,
+            query=_VecList.to_list(vec),
+            using="dense",
+            limit=limit,
+            with_payload=True,
+            with_vectors=bool(body.with_vectors),
+        )
+    except Exception as e:
+        return {"points": [], "collections": collections, "collection": target,
+                "warning": _safe_err("qdrant_search", e)}
+    out = []
+    for p in resp.points:
+        payload = p.payload or {}
+        out.append({
+            "id": str(p.id),
+            "score": float(getattr(p, "score", 0.0) or 0.0),
+            "text": str(payload.get("text", "")),
+            "payload": payload,
+        })
+    return {"collection": target, "collections": collections,
+            "query": body.query, "points": out}
+
+
+@router.delete("/chunks/{chunk_id}")
+def delete_chunk(
+    chunk_id: str,
+    authorization=Header(default=None),
+    collection: str | None = None,
+):
+    """청크 삭제 — 품질 불량(공백 오염 등) 청크 즉시 제거."""
+    _check_admin(authorization)
+    try:
+        client, _is_server = _make_client()
+    except Exception as e:
+        return {"ok": False, "warning": _safe_err("qdrant_init", e)}
+    try:
+        target, collections = _resolve_target_collection(client, collection)
+    except Exception as e:
+        return {"ok": False, "warning": str(e)}
+    pid = _coerce_point_id(chunk_id)
+    try:
+        client.delete(collection_name=target,
+                      points_selector=qm.PointIdsList(points=[pid]))
+    except KeyError:
+        # 임베디드 Qdrant 는 존재하지 않는 point id 삭제 시 KeyError 발생
+        _logger.warning("[admin] chunks delete: 존재하지 않는 ID %s (col=%s)",
+                       chunk_id, target)
+        return {"ok": False, "collection": target, "id": chunk_id,
+                "not_found": True,
+                "warning": "해당 ID의 청크를 찾을 수 없습니다 (존재하지 않는 ID)."}
+    except Exception as e:
+        return {"ok": False, "collection": target, "id": chunk_id,
+                "warning": _safe_err("qdrant_delete", e)}
+    return {"ok": True, "collection": target, "id": chunk_id}
+
+
+@router.patch("/chunks/{chunk_id}")
+def patch_chunk(
+    chunk_id: str,
+    body: ChunkPatchRequest,
+    authorization=Header(default=None),
+    collection: str | None = None,
+):
+    """청크 수정 — 텍스트/메타 갱신. text 변경 시 dense 벡터 재계산(sparse 보존)."""
+    _check_admin(authorization)
+    try:
+        client, _is_server = _make_client()
+    except Exception as e:
+        return {"ok": False, "warning": _safe_err("qdrant_init", e)}
+    try:
+        target, collections = _resolve_target_collection(client, collection)
+    except Exception as e:
+        return {"ok": False, "warning": str(e)}
+    pid = _coerce_point_id(chunk_id)
+
+    new_payload = {}
+    if body.text is not None:
+        new_payload["text"] = body.text
+    if body.payload:
+        new_payload.update(body.payload)
+
+    result = {"ok": True, "collection": target, "id": chunk_id, "updated": []}
+
+    if new_payload:
+        try:
+            client.set_payload(collection_name=target,
+                              payload=new_payload,
+                              points=[pid])
+            result["updated"].append("payload")
+        except KeyError:
+            # 임베디드 Qdrant 는 존재하지 않는 point id 수정 시 KeyError 발생
+            _logger.warning("[admin] chunks patch: 존재하지 않는 ID %s (col=%s)",
+                           chunk_id, target)
+            return {"ok": False, "collection": target, "id": chunk_id,
+                    "not_found": True,
+                    "warning": "해당 ID의 청크를 찾을 수 없습니다 (존재하지 않는 ID)."}
+        except Exception as e:
+            return {"ok": False, "collection": target, "id": chunk_id,
+                    "warning": _safe_err("qdrant_set_payload", e)}
+
+    if body.text is not None and body.reembed:
+        embedder_name = _embedder_name_for_collection(target)
+        try:
+            emb = get_embedder(embedder_name)
+            vec = emb.embed_query(body.text)
+            client.update_vectors(
+                collection_name=target,
+                points=[qm.PointVectors(
+                    id=pid,
+                    vector={"dense": _VecList.to_list(vec)},
+                )],
+            )
+            result["updated"].append("vector")
+        except KeyError:
+            return {"ok": False, "collection": target, "id": chunk_id,
+                    "not_found": True,
+                    "warning": "해당 ID의 청크를 찾을 수 없습니다 (존재하지 않는 ID)."}
+        except Exception as e:
+            result["warning"] = _safe_err("reembed", e)
+
+    return result
+
+
+@router.get("/chunks/stats")
+def chunk_stats(
+    authorization=Header(default=None),
+    collection: str | None = None,
+    sample_limit: int = 20000,
+):
+    """청크 품질 통계 — 빈 텍스트/공백 오염율 등 운영 지표 집계."""
+    _check_admin(authorization)
+    try:
+        client, _is_server = _make_client()
+    except Exception as e:
+        return {"warning": _safe_err("qdrant_init", e)}
+    try:
+        target, collections = _resolve_target_collection(client, collection)
+    except Exception as e:
+        return {"warning": str(e)}
+    total = 0
+    try:
+        total = client.count(collection_name=target).count
+    except Exception:
+        pass
+
+    sample_limit = max(1, min(int(sample_limit), 50000))
+    empties = 0
+    short = 0
+    high_space = 0
+    multispaces = 0
+    by_source: dict = {}
+    examined = 0
+    offset = None
+    while examined < sample_limit:
+        try:
+            pts, offset = client.scroll(
+                collection_name=target, limit=500, offset=offset,
+                with_payload=True, with_vectors=False,
+            )
+        except Exception as e:
+            return {"collection": target, "total": total,
+                    "warning": _safe_err("qdrant_scroll", e)}
+        if not pts:
+            break
+        for p in pts:
+            examined += 1
+            payload = p.payload or {}
+            text = str(payload.get("text", ""))
+            if not text.strip():
+                empties += 1
+            elif len(text) < 5:
+                short += 1
+            if text:
+                if (text.count(" ") / len(text)) >= 0.35:
+                    high_space += 1
+                if ("  " in text) or ("\t" in text):
+                    multispaces += 1
+            src = (payload.get("source") or payload.get("doc_id")
+                   or payload.get("file") or "unknown")
+            by_source[src] = by_source.get(src, 0) + 1
+        if offset is None:
+            break
+
+    return {
+        "collection": target,
+        "collections": collections,
+        "total": total,
+        "examined": examined,
+        "empty_text": empties,
+        "very_short_lt5": short,
+        "high_space_ratio_ge0_35": high_space,
+        "multi_space_or_tab": multispaces,
+        "top_sources": dict(sorted(by_source.items(),
+                                   key=lambda x: -x[1])[:15]),
+    }
+
 
 # ----- Usage stats (Gemini 한도 모니터링) -----
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ..models.orm import Interaction
 
 
@@ -124,8 +573,8 @@ GEMINI_FREE_RPM_LIMIT = 15       # 분당
 @router.get("/usage")
 def usage(authorization=Header(default=None)):
     _check_admin(authorization)
-    now = datetime.now(datetime.UTC)
-    today_start = datetime(now.year, now.month, now.day)
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     last_24h = now - timedelta(hours=24)
     last_1m = now - timedelta(minutes=1)
     with get_session() as s:
@@ -191,7 +640,7 @@ def list_errors(
     _check_admin(authorization)
     limit = max(1, min(limit, 500))
     hours = max(1, min(hours, 720))  # 최대 30일
-    since = datetime.now(datetime.UTC) - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     with get_session() as s:
         q = (
@@ -223,100 +672,12 @@ def list_errors(
         ]
 
 
-# ----- 구독 업그레이드 (관리자 수동 처리) -----
-from pydantic import BaseModel as _BM
-
-class SubscriptionUpgradeIn(_BM):
-    tier: str           # member | supporter | guest
-    extend_trial_days: int = 0   # 체험 연장 (0=무시)
-
-
-@router.patch("/subscribers/{sub_id}/subscription")
-def upgrade_subscription(
-    sub_id: str,
-    payload: SubscriptionUpgradeIn,
-    authorization=Header(default=None),
-):
-    """구독 티어 변경 + 체험 연장. 관리자 전용."""
-    _check_admin(authorization)
-    allowed = {"guest", "member", "supporter"}
-    if payload.tier not in allowed:
-        from fastapi import HTTPException
-        raise HTTPException(400, f"tier must be one of {allowed}")
-
-    with get_session() as s:
-        from ..models.orm import Subscriber
-        row = s.query(Subscriber).filter(Subscriber.subscriber_id == sub_id).first()
-        if not row:
-            from fastapi import HTTPException
-            raise HTTPException(404, "subscriber not found")
-
-        old_tier = row.subscription_tier
-        row.subscription_tier = payload.tier
-
-        if payload.tier in ("member", "supporter"):
-            row.subscribed_at = datetime.now(datetime.UTC)
-            row.trial_expires_at = None   # 유료 전환 시 만료 제거
-        elif payload.extend_trial_days > 0:
-            base = max(row.trial_expires_at or datetime.now(datetime.UTC), datetime.now(datetime.UTC))
-            row.trial_expires_at = base + timedelta(days=payload.extend_trial_days)
-
-        # 캐시 무효화
-        try:
-            from ..middleware.rate_limit import invalidate_sub_cache
-            invalidate_sub_cache(sub_id)
-        except Exception:
-            pass
-
-        return {
-            "ok": True,
-            "sub_id": sub_id,
-            "old_tier": old_tier,
-            "new_tier": row.subscription_tier,
-            "trial_expires_at": row.trial_expires_at.isoformat() if row.trial_expires_at else None,
-        }
-
-
-# ----- 구독 현황 통계 -----
-@router.get("/subscription-stats")
-def subscription_stats(authorization=Header(default=None)):
-    """구독 티어별 사용자 수 + 체험 만료 임박자 수."""
-    _check_admin(authorization)
-    from ..models.orm import Subscriber
-    now = datetime.now(datetime.UTC)
-    tomorrow = now + timedelta(days=1)
-    with get_session() as s:
-        total = s.query(Subscriber).count()
-        by_tier = {}
-        for row in s.query(Subscriber).all():
-            t = row.subscription_tier or "guest"
-            by_tier[t] = by_tier.get(t, 0) + 1
-        # 체험 만료 임박 (24시간 내)
-        expiring_soon = s.query(Subscriber).filter(
-            Subscriber.subscription_tier == "guest",
-            Subscriber.trial_expires_at != None,
-            Subscriber.trial_expires_at > now,
-            Subscriber.trial_expires_at <= tomorrow,
-        ).count()
-        # 이미 만료
-        already_expired = s.query(Subscriber).filter(
-            Subscriber.subscription_tier == "guest",
-            Subscriber.trial_expires_at != None,
-            Subscriber.trial_expires_at <= now,
-        ).count()
-    return {
-        "total": total,
-        "by_tier": by_tier,
-        "trial_expiring_24h": expiring_soon,
-        "trial_expired": already_expired,
-    }
-
 
 @router.get("/error-stats")
 def error_stats(authorization=Header(default=None)):
     """에러 요약 통계 — 사이드바 뱃지 및 대시보드 지표용."""
     _check_admin(authorization)
-    now = datetime.now(datetime.UTC)
+    now = datetime.now(timezone.utc)
     h1   = now - timedelta(hours=1)
     h24  = now - timedelta(hours=24)
     d7   = now - timedelta(days=7)
@@ -404,13 +765,8 @@ def get_settings(authorization=Header(default=None)):
             "retriever_boost_enabled":      settings.retriever_boost_enabled,
             "legalism_check_enabled":       settings.legalism_check_enabled,
             "gospel_core_fallback_enabled": settings.gospel_core_fallback_enabled,
-            "token_quota_enabled":          settings.token_quota_enabled,
-            "rate_limit_enabled":           settings.rate_limit_enabled,
         },
         "quota": {
-            "tokens_daily_guest":        settings.tokens_daily_guest,
-            "tokens_monthly_member":     settings.tokens_monthly_member,
-            "tokens_monthly_supporter":  settings.tokens_monthly_supporter,
             "token_estimate_per_request": settings.token_estimate_per_request,
         },
         "langfuse": {
@@ -424,3 +780,138 @@ def get_settings(authorization=Header(default=None)):
             "data_dir":  settings.data_dir,
         },
     }
+
+
+# ----- 백데이터 분석 (interaction 소스 분석) -----
+import re
+from collections import Counter
+
+
+@router.get("/analytics/interactions")
+def analytics_interactions(limit: int = 200, authorization=Header(default=None)):
+    """질문 트렌드 / 문서 인용 랭킹 / 키워드 트렌드 / 피드백 통계 (읽기 전용).
+
+    콜라보 파일 V-1 지시 구현. V-1 원안의 `GROUP BY target_lang`(언어별 분포)은
+    `interaction` 테이블에 해당 컬럼이 없어 제외했다 — 할루시네이션 보정.
+    """
+    _check_admin(authorization)
+    limit = max(1, min(int(limit), 1000))
+
+    from ..models.orm import Document
+
+    with get_session() as s:
+        rows = (
+            s.query(
+                Interaction.question,
+                Interaction.cited_versions,
+                Interaction.feedback,
+                Interaction.low_coverage,
+            )
+            .order_by(Interaction.created_at.desc())
+            .limit(limit * 5)  # 충분한 표본
+            .all()
+        )
+        total_docs = s.query(Document).count()
+
+    question_counter: Counter = Counter()
+    doc_counter: Counter = Counter()
+    keyword_counter: Counter = Counter()
+    feedback = {"positive": 0, "negative": 0, "none": 0}
+    low_coverage_count = 0
+    total = 0
+
+    for q, cvs, fb, lc in rows:
+        total += 1
+        if lc:
+            low_coverage_count += 1
+        q = (q or "").strip()
+        if q:
+            question_counter[q] += 1
+            for tok in re.findall(r"[가-힣A-Za-z0-9]+", q):
+                if len(tok) >= 2:
+                    keyword_counter[tok] += 1
+        if isinstance(cvs, list):
+            for c in cvs:
+                if isinstance(c, dict) and c.get("doc_id"):
+                    doc_counter[c.get("doc_id")] += 1
+        if fb == 1:
+            feedback["positive"] += 1
+        elif fb == -1:
+            feedback["negative"] += 1
+        else:
+            feedback["none"] += 1
+
+    cited_doc_count = len(doc_counter)
+    return {
+        "total_interactions": total,
+        "sampled": len(rows),
+        "question_trends": [
+            {"question": k, "count": v} for k, v in question_counter.most_common(limit)
+        ],
+        "doc_citation_ranking": [
+            {"doc_id": k, "citations": v} for k, v in doc_counter.most_common(limit)
+        ],
+        "keyword_trends": [
+            {"keyword": k, "count": v} for k, v in keyword_counter.most_common(limit)
+        ],
+        "feedback": feedback,
+        "low_coverage": {
+            "count": low_coverage_count,
+            "pct": round(low_coverage_count / total * 100, 1) if total else 0.0,
+        },
+        "coverage": {
+            "total_documents": total_docs,
+            "cited_documents": cited_doc_count,
+            "uncited_documents": max(total_docs - cited_doc_count, 0),
+        },
+        "language_distribution": {
+            "available": False,
+            "reason": "interaction 테이블에 target_lang 컬럼이 없어 언어별 분포 제공 불가",
+        },
+    }
+
+
+# ── 계정 차단/해제 관리 (2026-08-18) ──────────────────────────────
+class _BanReq(BaseModel):
+    reason: str = ""
+
+
+@router.post("/subscribers/{subscriber_id}/ban")
+def admin_ban_subscriber(
+    subscriber_id: str,
+    req: _BanReq | None = None,
+    authorization: str = Header(default=""),
+):
+    """계정 차단: flagged_as_bot=True 설정. 차단된 계정은 로그인/재가입 불가.
+
+    인증: check_admin (X-Admin-Key 또는 회원 인증).
+    """
+    _check_admin(authorization or "")
+    reason = req.reason if req else ""
+    from ..models.orm import Subscriber
+    with get_session() as s:
+        sub = s.query(Subscriber).filter(Subscriber.subscriber_id == subscriber_id).first()
+        if not sub:
+            raise HTTPException(404, "계정을 찾을 수 없습니다.")
+        sub.flagged_as_bot = True
+        s.add(sub)
+        s.flush()
+    return {"ok": True, "subscriber_id": subscriber_id, "banned": True, "reason": reason}
+
+
+@router.post("/subscribers/{subscriber_id}/unban")
+def admin_unban_subscriber(
+    subscriber_id: str,
+    authorization: str = Header(default=""),
+):
+    """계정 차단 해제: flagged_as_bot=False."""
+    _check_admin(authorization or "")
+    from ..models.orm import Subscriber
+    with get_session() as s:
+        sub = s.query(Subscriber).filter(Subscriber.subscriber_id == subscriber_id).first()
+        if not sub:
+            raise HTTPException(404, "계정을 찾을 수 없습니다.")
+        sub.flagged_as_bot = False
+        s.add(sub)
+        s.flush()
+    return {"ok": True, "subscriber_id": subscriber_id, "banned": False}

@@ -20,8 +20,9 @@ progress_cb(current, total, detail) — 임베딩 배치 완료 시마다 호출
 # Status: COMPLETED
 # =============================================================================
 from __future__ import annotations
+import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import numpy as np
@@ -30,16 +31,54 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models.orm import (
-    Document, DocumentVersion, DocVersionState, IndexSnapshot,
+    DocumentVersion, DocVersionState, IndexSnapshot,
 )
 from . import audit_service, document_service
-from .chunker import chunk_text
 from .embedding.factory import get_embedder
 from .vector_store import QdrantStore
+
+logger = logging.getLogger(__name__)
 
 ProgressCb = Optional[Callable[[int, int, str], None]]
 
 _EMBED_BATCH = 10   # 한 번에 임베딩할 청크 수 (진행바 세분화용)
+
+
+def _ingest_to_enhanced_rag(version: "DocumentVersion") -> None:
+    """발행된 문서를 enhanced_rag 이중 저장 컬렉션에 인제스트.
+
+    실패해도 publish 자체는 성공하도록 예외를 삼켜다(graceful degradation).
+    본문이 너무 짧으면 인제스트하지 않는다.
+    """
+    # 이중 저장(enhanced_rag)은 중국어 우선 bilingual 모드에서만 의미가 있음.
+    # rag_bilingual_enabled 가 꺼져 있으면 표준 단일언어 경로이므로 스킵
+    # (bge-m3 등 중국어 임베더 로드 시도/오류 · 불필요한 2중 컬렉션 저장 방지).
+    if not settings.rag_bilingual_enabled:
+        return
+    try:
+        from .enhanced_rag import get_pipeline
+        from .enhanced_rag.types import RAGDocument
+
+        body = document_service.get_effective_body(version)
+        if not body or len(body.strip()) < 50:
+            return
+        doc = version.document
+        rag_pipeline = get_pipeline()
+        rag_doc = RAGDocument(
+            doc_id=f"{version.doc_id}#v{version.version_number}",
+            title=version.title or "",
+            source=doc.doc_key or doc.doc_type or "sermon",
+            content=body,
+            metadata={
+                "doc_type": doc.doc_type,
+                "scripture_refs": version.scripture_refs or [],
+                "topic_tags": version.topic_tags or [],
+            },
+        )
+        rag_pipeline.add_document(rag_doc)
+        logger.info("[publish] enhanced_rag 이중 저장 완료: %s", rag_doc.doc_id)
+    except Exception as exc:
+        logger.warning("[publish] enhanced_rag 인제스트 실패 (폴백): %s", exc)
 
 
 def publish_version(
@@ -51,15 +90,15 @@ def publish_version(
     progress_cb: ProgressCb = None,
 ) -> IndexSnapshot:
     """L2 -> Qdrant 인덱싱 + L3 snapshot 생성."""
-    if version.state not in {DocVersionState.validated.value, DocVersionState.draft.value}:
-        raise ValueError(f"Cannot publish version in state {version.state}")
+    if version.state != DocVersionState.validated.value:
+        raise ValueError(f"Cannot publish version in state {version.state} — validated 상태만 게시 가능")
 
     embedder_name = embedder_name or settings.embedder
     embedder = get_embedder(embedder_name)
     store = QdrantStore(embedder_name, dim=embedder.dim)
 
     # 본문 (마이크로 패치 우선)
-    body = document_service.get_effective_body(version)
+    body = document_service.get_effective_body(version, session=session)
     if not body:
         raise ValueError("Body is empty")
 
@@ -151,7 +190,7 @@ def publish_version(
     # 이 버전 -> published (DB 변경)
     prev_state = version.state
     version.state = DocVersionState.published.value
-    version.published_at = datetime.now(datetime.UTC)
+    version.published_at = datetime.now(timezone.utc)
     version.published_by = who
 
     snap = IndexSnapshot(
@@ -165,8 +204,17 @@ def publish_version(
     session.add(snap)
     session.flush()  # DB 변경 확정 후 Qdrant 호출 (N2: drift 임시 완화)
 
-    # N15: 옛 published 청크 먼저 삭제 (현재 버전 제외, doc_id 기준 filter)
     from qdrant_client.http import models as qm
+
+    # N2: Qdrant upsert는 DB flush 성공 후 (영구 drift 위험 완화)
+    store.upsert(
+        ids=chunk_ids,
+        texts=texts,
+        dense_vecs=vectors.tolist(),
+        metadatas=metadatas,
+    )
+
+    # N15: 옛 published 청크 삭제 (현재 버전 제외, doc_id 기준 filter)
     store.delete_where(qm.Filter(
         must=[
             qm.FieldCondition(key="doc_id", match=qm.MatchValue(value=doc.doc_id)),
@@ -175,14 +223,6 @@ def publish_version(
             qm.FieldCondition(key="version_id", match=qm.MatchValue(value=str(version.version_id))),
         ],
     ))
-
-    # N2: Qdrant upsert는 DB flush 성공 후 (영구 drift 위험 완화)
-    store.upsert(
-        ids=chunk_ids,
-        texts=texts,
-        dense_vectors=vectors.tolist(),
-        metadatas=metadatas,
-    )
 
     # V2: 자체 BM25 sparse 인덱스에도 반영 (embedded 하이브리드 검색)
     try:
@@ -195,8 +235,12 @@ def publish_version(
             (cid, txt, dict(meta, text=txt))
             for cid, txt, meta in zip(chunk_ids, texts, metadatas)
         ])
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning(
+            "[publish] BM25 sparse 인덱스 갱신 실패 — 하이브리드 검색 정확도 저하 가능: %s",
+            _e,
+            exc_info=True,
+        )
 
     audit_service.log(
         session, action="version.publish", entity_type="document_version",
@@ -209,12 +253,11 @@ def publish_version(
         },
     )
 
-    # E-E: publish 시 용어 자동 추출 (실패해도 publish 자체는 성공)
+    # 작업 H: enhanced_rag 이중 저장 인제스트 (실패해도 publish 자체는 성공)
     try:
-        from .glossary_service import extract_terms_from_text
-        extract_terms_from_text(session, body, doc_id=doc.doc_id)
-    except Exception:
-        pass
+        _ingest_to_enhanced_rag(version)
+    except Exception as exc:
+        logger.warning("[publish] enhanced_rag 인제스트 호출 실패 (무시): %s", exc)
 
     return snap
 
@@ -348,7 +391,7 @@ def finalize_publish(
     # 이 버전 → published
     prev_state = version.state
     version.state = DocVersionState.published.value
-    version.published_at = datetime.now(datetime.UTC)
+    version.published_at = datetime.now(timezone.utc)
     version.published_by = who
 
     snap = IndexSnapshot(
@@ -362,6 +405,14 @@ def finalize_publish(
     session.add(snap)
     session.flush()
 
+    # Qdrant upsert
+    store.upsert(
+        ids=chunk_ids,
+        texts=texts,
+        dense_vecs=vectors_np.tolist(),
+        metadatas=metadatas,
+    )
+
     # 옛 Qdrant 청크 삭제
     store.delete_where(qm.Filter(
         must=[
@@ -371,14 +422,6 @@ def finalize_publish(
             qm.FieldCondition(key="version_id", match=qm.MatchValue(value=str(version.version_id))),
         ],
     ))
-
-    # Qdrant upsert
-    store.upsert(
-        ids=chunk_ids,
-        texts=texts,
-        dense_vectors=vectors_np.tolist(),
-        metadatas=metadatas,
-    )
 
     # BM25 sparse 인덱스
     try:
@@ -391,8 +434,12 @@ def finalize_publish(
             (cid, txt, dict(meta, text=txt))
             for cid, txt, meta in zip(chunk_ids, texts, metadatas)
         ])
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning(
+            "[publish] BM25 sparse 인덱스 갱신 실패 — 하이브리드 검색 정확도 저하 가능: %s",
+            _e,
+            exc_info=True,
+        )
 
     audit_service.log(
         session, action="version.publish", entity_type="document_version",
@@ -405,12 +452,10 @@ def finalize_publish(
         },
     )
 
-    # 용어 자동 추출
+    # 작업 H: enhanced_rag 이중 저장 인제스트 (실패해도 publish 자체는 성공)
     try:
-        body = document_service.get_effective_body(version)
-        from .glossary_service import extract_terms_from_text
-        extract_terms_from_text(session, body, doc_id=doc.doc_id)
-    except Exception:
-        pass
+        _ingest_to_enhanced_rag(version)
+    except Exception as exc:
+        logger.warning("[publish] enhanced_rag 인제스트 호출 실패 (무시): %s", exc)
 
     return snap

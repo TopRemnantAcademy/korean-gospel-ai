@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 from typing import Sequence
 
-import httpx
 import numpy as np
 
 from .base import BaseEmbedder
@@ -48,16 +47,17 @@ class VoyageEmbedder(BaseEmbedder):
             payload["input_type"] = input_type  # "document" or "query"
 
         try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(self._api_url, headers=headers, json=payload)
-                if response.status_code != 200:
-                    log.error(f"Voyage API Error [{response.status_code}]: {response.text}")
-                    response.raise_for_status()
-                
-                data = response.json().get("data", [])
-                # index 순서대로 정렬하여 반환 보장
-                data_sorted = sorted(data, key=lambda x: x.get("index", 0))
-                return [item["embedding"] for item in data_sorted]
+            from ...connections import connections
+            client = connections.http_client()
+            response = client.post(self._api_url, headers=headers, json=payload, timeout=30.0)
+            if response.status_code != 200:
+                log.error(f"Voyage API Error [{response.status_code}]: {response.text}")
+                response.raise_for_status()
+            
+            data = response.json().get("data", [])
+            # index 순서대로 정렬하여 반환 보장
+            data_sorted = sorted(data, key=lambda x: x.get("index", 0))
+            return [item["embedding"] for item in data_sorted]
         except Exception as e:
             log.exception(f"Failed to fetch embeddings from Voyage API: {e}")
             raise

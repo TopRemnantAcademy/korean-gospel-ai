@@ -13,7 +13,16 @@ class KureEmbedder(BaseEmbedder):
 
     def __init__(self, model_id: str | None = None):
         from sentence_transformers import SentenceTransformer
-        self._model = SentenceTransformer(model_id or self.model_id)
+        from ...config import settings
+
+        # Windows HF 캐시가 심링크(junction)로 깨져 로드 실패하는 환경 우회:
+        # KURE_MODEL_PATH(실제 파일 복사본 로컬 경로)가 설정돼 있으면 우선 사용.
+        effective = (
+            model_id
+            or getattr(settings, "kure_model_path", None)
+            or self.model_id
+        )
+        self._model = SentenceTransformer(effective)
         self._dim = self._model.get_sentence_embedding_dimension()
 
     @property

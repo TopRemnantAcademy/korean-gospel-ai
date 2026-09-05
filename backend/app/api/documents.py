@@ -13,13 +13,17 @@
 """
 from __future__ import annotations
 import asyncio
-from typing import Optional
+import json
+import logging
+from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import get_session
-from ..models.orm import DocVersionState
 from ..models.schemas import (
     DraftMetaIn, DocMetaIn, BodyPatchIn,
     DocumentSummary, VersionDetail,
@@ -33,19 +37,24 @@ from ..services.embedding.factory import get_embedder
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
+# 백그라운드 태스크 참조 보관 — GC 방지
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_bg_task(coro) -> None:
+    """asyncio.create_task 참조를 보관하여 예기치 않은 GC 를 방지."""
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
 
 # ---------- Auth ----------
-def _check_admin(authorization: Optional[str]):
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=403, detail="missing admin token")
-    token = authorization.split(" ", 1)[1].strip()
-    if token != settings.admin_api_key:
-        raise HTTPException(status_code=403, detail="invalid admin token")
+from .auth import check_admin as _check_admin
 
     # Schemas are now in models/schemas.py
 
 
-# ---------- helpers (라우트보다 먼저 정의 — inbox 라우트에서 사용) ----------
+# ---------- helpers ----------
 def _to_version_detail(v) -> VersionDetail:
     art = v.artifact
     preview = (art.extracted_text or "")[:1200]
@@ -71,135 +80,6 @@ def _to_version_detail(v) -> VersionDetail:
         created_at=v.created_at.isoformat(),
         published_at=v.published_at.isoformat() if v.published_at else None,
     )
-
-
-# ---------- inbox 폴더 관리 (⚠ 정적 경로 — /{doc_id} 보다 반드시 먼저 등록해야 shadow 안 됨) ----------
-_INBOX_DIR = settings.root_dir / "data" / "inbox"
-_PROCESSED_DIR = _INBOX_DIR / "processed"
-_SUPPORTED_EXT = {".md", ".txt", ".pdf", ".docx"}
-
-
-@router.get("/inbox")
-def list_inbox(authorization: Optional[str] = Header(default=None)):
-    """data/inbox/ 폴더의 처리 대기 파일 목록."""
-    _check_admin(authorization)
-    _INBOX_DIR.mkdir(parents=True, exist_ok=True)
-    from datetime import datetime
-    files = []
-    for f in _INBOX_DIR.iterdir():
-        if f.is_file() and f.suffix.lower() in _SUPPORTED_EXT:
-            stat = f.stat()
-            files.append({
-                "name": f.name,
-                "size_bytes": stat.st_size,
-                "ext": f.suffix.lower().lstrip("."),
-                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            })
-    files.sort(key=lambda x: x["modified"], reverse=True)
-    return {"files": files, "inbox_path": str(_INBOX_DIR)}
-
-
-@router.post("/ingest-inbox")
-async def ingest_inbox_async(
-    filenames: str = Form(...),        # JSON 배열 문자열: '["a.md","b.pdf"]'
-    doc_type: str = Form("sermon"),
-    authorization: Optional[str] = Header(default=None),
-):
-    """inbox 폴더의 선택한 파일들을 일괄 비동기 처리."""
-    import json as _json
-    _check_admin(authorization)
-    _INBOX_DIR.mkdir(parents=True, exist_ok=True)
-    _PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-
-    try:
-        names = _json.loads(filenames)
-    except Exception:
-        raise HTTPException(400, "filenames must be JSON array string")
-
-    if not names:
-        raise HTTPException(400, "no files selected")
-
-    to_process = []
-    for name in names:
-        path = _INBOX_DIR / name
-        if path.is_file() and path.suffix.lower() in _SUPPORTED_EXT:
-            to_process.append(path)
-
-    if not to_process:
-        raise HTTPException(404, "no valid files found in inbox")
-
-    job_id = job_service.create_job("ingest_inbox")
-
-    async def _run():
-        try:
-            total = len(to_process)
-            done = []
-            errors = []
-
-            def _stage(stage: str, detail: str = "", pct: int = 0):
-                job_service.update_stage(job_id, stage, detail, pct)
-
-            for i, fpath in enumerate(to_process):
-                pct_base = int((i / total) * 90)
-                _stage(f"📂 처리 중 ({i+1}/{total})", fpath.name, pct_base)
-                raw = fpath.read_bytes()
-                title_guess = fpath.stem.replace("_", " ").replace("-", " ")
-
-                def _sync_one(raw=raw, fname=fpath.name, title=title_guess):
-                    with get_session() as s:
-                        artifact, _ = source_service.ingest_file(
-                            s, filename=fname, raw=raw, progress_cb=None,
-                        )
-                        _artifact_id    = artifact.artifact_id
-                        _content_hash   = artifact.content_hash
-                        _extracted_head = (artifact.extracted_text or "")[:500]
-
-                    from ..models.orm import SourceArtifact as _SA
-                    with get_session() as s:
-                        fresh_art = s.get(_SA, _artifact_id)
-                        version = document_service.create_draft_from_artifact(
-                            s, artifact=fresh_art,
-                            title=title, doc_type=doc_type,
-                        )
-                        _doc_id = version.doc_id
-                        det     = _to_version_detail(version)
-
-                    with get_session() as s:
-                        hits = dedup_service.check_on_upload(
-                            s, content_hash=_content_hash,
-                            proposed_title=title,
-                            extracted_head=_extracted_head,
-                        )
-                        det.dup_hits = [
-                            dedup_service.to_dict(h) for h in hits if h.doc_id != _doc_id
-                        ]
-                    return det.model_dump()
-
-                try:
-                    result = await asyncio.to_thread(_sync_one)
-                    done.append({
-                        "file": fpath.name,
-                        "title": result.get("title"),
-                        "version_id": result.get("version_id"),
-                    })
-                    import shutil
-                    shutil.move(str(fpath), str(_PROCESSED_DIR / fpath.name))
-                except Exception as e:
-                    errors.append({"file": fpath.name, "error": str(e)[:200]})
-
-            job_service.complete_job(job_id, {
-                "done": done, "errors": errors,
-                "total": total, "success_count": len(done),
-            })
-        except Exception as e:
-            import traceback as _tb
-            job_service.fail_job(job_id, {
-                "error": str(e)[:400],
-                "traceback": _tb.format_exc()[:2000],
-            })
-
-    asyncio.create_task(_run())
-    return {"job_id": job_id, "file_count": len(to_process)}
 
 
 # ---------- 1) Upload ----------
@@ -374,7 +254,6 @@ async def upload_document_async(
                         salvation_focus_score=salvation_focus_score,
                         gospel_core_tag=_gospel_core,
                     )
-                    _version_id = version.version_id
                     _doc_id     = version.doc_id
                     # _to_version_detail 은 artifact lazy-load 필요 → 세션 내에서 호출
                     detail = _to_version_detail(version)
@@ -405,7 +284,7 @@ async def upload_document_async(
                 "traceback": _tb.format_exc()[:2000],
             })
 
-    asyncio.create_task(_run())
+    _spawn_bg_task(_run())
     return {"job_id": job_id}
 
 
@@ -549,22 +428,34 @@ def preview_version(
             dedup_hits = [
                 dedup_service.to_dict(h) for h in hits if h.doc_id != v.doc_id
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "[documents] dedup check failed; upload proceeds without dedup: %s", e
+            )
         
         # 4) 청크 미리보기 (quality_gate 통과 시뮬레이션)
         chunk_preview = []
         try:
             from ..services.chunker import chunk_text
             from ..services.quality_gate import check_chunk
-            
-            chunks = chunk_text(full_text)
+            from ..services.normalizer import preprocess_for_chunking
+            from ..config import settings
+
+            # 실제 인제스트와 동일하게 정규화 → 청킹 (파라미터도 동일 설정 사용)
+            _clean = preprocess_for_chunking(full_text) if full_text else ""
+            chunks = chunk_text(
+                _clean,
+                target_tokens=settings.ingest_chunk_target_tokens,
+                max_tokens=settings.ingest_chunk_max_tokens,
+                min_tokens=settings.ingest_chunk_min_tokens,
+                overlap_sentences=settings.ingest_chunk_overlap,
+            )
             for c in chunks[:10]:  # 처음 10개만
                 q = check_chunk(c.text, c.chunk_id)
                 chunk_preview.append({
                     "chunk_id": c.chunk_id,
                     "text_preview": c.text[:200],
-                    "token_count": c.token_count,
+                    "token_count": c.token_estimate,
                     "quality": q,
                 })
         except Exception as e:
@@ -732,7 +623,7 @@ async def publish_version_async(
                 "traceback": _tb.format_exc()[:2000],
             })
 
-    asyncio.create_task(_run())
+    _spawn_bg_task(_run())
     return {"job_id": job_id}
 
 
@@ -750,26 +641,31 @@ async def run_cleanup_endpoint(
     발행(publish) 시 자동 실행되므로 수동 호출은 선택 사항.
     """
     _check_admin(authorization)
-    with get_session() as s:
-        v = document_service.get_version(s, version_id)
-        if not v or v.doc_id != doc_id:
-            raise HTTPException(404, "version not found")
-        art = v.artifact
-        source_text = v.body_patch or (art.extracted_text if art else "") or ""
-        if not source_text.strip():
-            raise HTTPException(400, "텍스트가 없습니다 (body_patch/extracted_text 비어있음)")
 
-    from ..services.cleanup_pipeline import extract_terms
-    terms = extract_terms(source_text)
-
-    if not payload.dry_run and terms:
+    def _cleanup_sync():
         with get_session() as s:
             v = document_service.get_version(s, version_id)
-            audit_service.log(
-                s, action="document.terms_extracted", entity_type="document_version",
-                entity_id=version_id, who="admin",
-                note={"terms": terms, "auto": False},
-            )
+            if not v or v.doc_id != doc_id:
+                raise HTTPException(404, "version not found")
+            art = v.artifact
+            source_text = v.body_patch or (art.extracted_text if art else "") or ""
+            if not source_text.strip():
+                raise HTTPException(400, "텍스트가 없습니다 (body_patch/extracted_text 비어있음)")
+
+        from ..services.cleanup_pipeline import extract_terms
+        terms = extract_terms(source_text)
+
+        if not payload.dry_run and terms:
+            with get_session() as s:
+                document_service.get_version(s, version_id)
+                audit_service.log(
+                    s, action="document.terms_extracted", entity_type="document_version",
+                    entity_id=version_id, who="admin",
+                    note={"terms": terms, "auto": False},
+                )
+        return terms
+
+    terms = await asyncio.to_thread(_cleanup_sync)
 
     return {
         "ok": True,
@@ -934,7 +830,6 @@ async def ingest_text_async(
                         scripture_refs=refs,
                         summary=summary,
                     )
-                    _version_id = version.version_id
                     _doc_id     = version.doc_id
                     detail      = _to_version_detail(version)
 
@@ -946,9 +841,9 @@ async def ingest_text_async(
                         proposed_title=title,
                         extracted_head=_extracted_head,
                     )
-                    detail.dup_hits = [
-                        dedup_service.to_dict(h) for h in hits if h.doc_id != _doc_id
-                    ]
+                detail.dup_hits = [
+                    dedup_service.to_dict(h) for h in hits if h.doc_id != _doc_id
+                ]
                 return detail.model_dump()
 
             result = await asyncio.to_thread(_sync_work)
@@ -960,7 +855,129 @@ async def ingest_text_async(
                 "traceback": _tb.format_exc()[:2000],
             })
 
-    asyncio.create_task(_run())
+    _spawn_bg_task(_run())
     return {"job_id": job_id}
+
+
+# ──────────────────────────────────────────────────────────────
+# 정제 데이터 직행 (Fast-Track) — 번역/청킹 생략, 제공된 청크를 바로 적재
+# ──────────────────────────────────────────────────────────────
+class CleanChunkIn(BaseModel):
+    chunk_index: int = 0
+    korean_text: str = ""
+    chinese_text: str = ""
+    topic_tags: List[str] = Field(default_factory=list)
+    scripture_refs: List[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class CleanDocIn(BaseModel):
+    doc_id: str = ""
+    title: str = ""
+    source: str = "external"
+    language: str = "ko"
+    content_hash: str = ""
+    chunks: List[CleanChunkIn] = Field(default_factory=list)
+
+
+def _normalize_clean_documents(raw_docs: list, filename: str) -> list[dict]:
+    """다양한 입력 형태를 ingest_external 이 기대하는 문서 dict 로 정규화.
+
+    - dict with "chunks"/"documents" -> 문서
+    - dict with korean_text/chinese_text -> 단일 청크 문서로 래핑
+    - 그 외 -> 오류
+    """
+    normalized: list[dict] = []
+    for d in raw_docs:
+        if not isinstance(d, dict):
+            raise ValueError("문서 항목이 객체(JSON)가 아닙니다")
+        if "chunks" in d or "documents" in d:
+            normalized.append(d)
+        elif "korean_text" in d or "chinese_text" in d:
+            normalized.append({
+                "doc_id": (d.get("doc_id") or "").strip() or filename,
+                "title": (d.get("title") or "").strip() or filename,
+                "source": d.get("source", "external"),
+                "language": d.get("language", "ko"),
+                "content_hash": d.get("content_hash", ""),
+                "chunks": [d],
+            })
+        else:
+            raise ValueError("인식할 수 없는 항목 (chunks/documents 또는 korean_text 필요)")
+    return normalized
+
+
+def _parse_clean_chunks(raw: bytes, filename: str) -> list[dict]:
+    """업로드 파일(JSON/JSONL) -> 정규화된 문서 dict 리스트."""
+    text = raw.decode("utf-8", errors="replace").strip()
+    if not text:
+        raise ValueError("빈 파일입니다")
+    docs: list = []
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            docs = obj.get("documents", [obj])
+        elif isinstance(obj, list):
+            docs = obj
+        else:
+            raise ValueError("최상위가 객체/배열이 아닙니다")
+    except json.JSONDecodeError:
+        # JSONL: 한 줄에 하나의 JSON 객체
+        docs = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line:
+                docs.append(json.loads(line))  # 파싱 오류는 400 으로 전파
+    if not docs:
+        raise ValueError("파싱된 문서가 없습니다")
+    return _normalize_clean_documents(docs, filename)
+
+
+@router.post("/ingest-clean-chunks")
+async def ingest_clean_chunks(
+    file: UploadFile,
+    authorization: Optional[str] = Header(default=None),
+):
+    """외부에서 완전히 정제·번역된 청크(JSON/JSONL)를 LLM 번역 없이 바로 적재.
+
+    - 청킹/번역 생략 -> 인제스트가 수 초 내 완료.
+    - dense(bge_m3, 중국어) + dense_ko(kure, 한국어) 이중 벡터 적재.
+    - 동일 doc_id 재업로드 시 기존 청크 증분 교체.
+    기존 원시 파일 파이프라인(DocumentIngestor)은 건드리지 않음.
+    """
+    _check_admin(authorization)
+    raw = await file.read()
+    try:
+        docs = _parse_clean_chunks(raw, file.filename or "external")
+    except Exception as e:
+        raise HTTPException(400, f"파일 파싱 실패: {e}")
+
+    if not docs:
+        raise HTTPException(400, "적재할 문서가 없습니다")
+
+    try:
+        from ..services.enhanced_rag import get_pipeline
+        pipeline = get_pipeline()
+        store = pipeline.store
+    except Exception as e:
+        logger.warning("[documents] enhanced_rag 파이프라인 로드 실패: %s", e)
+        raise HTTPException(503, f"enhanced_rag 사용 불가: {e}")
+
+    try:
+        # 임베딩은 블로킹 작업 -> 이벤트 루프 점유 방지
+        result = await asyncio.to_thread(store.ingest_external, docs)
+    except Exception as e:
+        import traceback as _tb
+        logger.error("[documents] ingest_external 실패: %s", _tb.format_exc())
+        raise HTTPException(500, f"적재 실패: {e}")
+
+    if not result:
+        raise HTTPException(400, "적재할 청크가 없습니다 (korean_text 누락 등)")
+    return {
+        "status": "ok",
+        "collection": store.collection,
+        "ingested": result,
+        "total_chunks": sum(result.values()),
+    }
 
 

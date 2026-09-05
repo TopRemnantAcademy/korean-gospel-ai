@@ -22,6 +22,7 @@ _FALLBACK_QUESTION = {
     "ko": "어떤 상황에서 그런 마음이 드시는지 조금 더 말씀해 주시겠습니까?",
     "en": "Could you share a little more about the situation you are facing?",
     "zh": "请问您是在哪种情况下有这样的感受,能再告诉我一些吗?",
+    "ja": "どのような状況でそのように感じられたのか、もう少し詳しく教えていただけますでしょうか？",
 }
 
 
@@ -48,7 +49,7 @@ async def generate_clarifying_question(
             max_tokens=150,
         )
         text = (resp.text or "").strip()
-        if text and "?" in text:
+        if text and ("?" in text or "？" in text):
             return text
         # 물음표 없으면 기본값 — LLM 이 지시를 무시한 경우
         logger.warning("clarifier: LLM response missing '?' — using fallback")

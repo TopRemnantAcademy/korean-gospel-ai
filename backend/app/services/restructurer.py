@@ -92,7 +92,13 @@ async def restructure_text(
             logger.warning("restructure window#%d 실패: %s — 원문 유지", i, e)
             return i, win, f"window#{i}: LLM 실패 → 원문 유지", None
 
-    tasks = [_process_window(i, win) for i, win in enumerate(windows)]
+    sem = asyncio.Semaphore(5)
+
+    async def _process_window_with_sem(i: int, win: str) -> tuple[int, str, str | None, str | None]:
+        async with sem:
+            return await _process_window(i, win)
+
+    tasks = [_process_window_with_sem(i, win) for i, win in enumerate(windows)]
     results = await asyncio.gather(*tasks)
 
     # 순서 보장을 위해 정렬

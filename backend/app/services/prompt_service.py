@@ -3,14 +3,16 @@
 current() 가 항상 1개의 활성 프롬프트를 반환. 없으면 코드 기본값 사용.
 """
 from __future__ import annotations
+import logging
 import time as _time
 from typing import Optional
 
-from sqlalchemy.orm import Session
 
 from ..db import get_session
 from ..models.orm import PromptTemplate
 from ..prompts.system import GOSPEL_SYSTEM_PROMPT as DEFAULT_PROMPT
+
+logger = logging.getLogger(__name__)
 
 # 60초 TTL 인-메모리 캐시 — 요청마다 DB 조회 방지
 _cache_text: str | None = None
@@ -59,8 +61,8 @@ def current_detail() -> dict:
                     "updated_at": row.updated_at.isoformat(),
                     "is_custom": True,
                 }
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("failed to load active prompt detail, using default: %s", _e)
     return {
         "template_id": None,
         "name": "default (코드 기본값)",

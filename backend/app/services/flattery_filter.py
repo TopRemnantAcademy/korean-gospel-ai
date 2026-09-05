@@ -12,7 +12,6 @@
 from __future__ import annotations
 import logging
 import re
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -32,13 +31,22 @@ class FlatteryFilterResult(BaseModel):
 _YAML_PATH = Path(__file__).resolve().parents[3] / "data" / "policy" / "flattery_patterns.yaml"
 
 
-@lru_cache(maxsize=1)
+_compiled_cache: dict[str, tuple] = {}
+_compiled_cache_mtime: float = 0.0
+
 def _load_compiled() -> dict[str, dict[str, list[tuple[str, re.Pattern]]]]:
     """YAML 패턴을 로드하여 컴파일된 정규식 딕셔너리로 반환.
 
     구조: { lang: { category: [(raw_pat, compiled), ...] } }
-    모듈 import 시 1회만 실행 (lru_cache).
+    파일 수정 시간(mtime) 기반 캐시로 무효화.
     """
+    global _compiled_cache, _compiled_cache_mtime
+    try:
+        mtime = _YAML_PATH.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    if _compiled_cache and _compiled_cache_mtime == mtime:
+        return _compiled_cache
     if not _YAML_PATH.exists():
         logger.warning("flattery_patterns.yaml not found at %s", _YAML_PATH)
         return {}
@@ -57,6 +65,8 @@ def _load_compiled() -> dict[str, dict[str, list[tuple[str, re.Pattern]]]]:
                     logger.error("flattery_filter: invalid regex '%s' (%s) — skipped", pat, e)
             compiled[lang][category] = compiled_patterns
 
+    _compiled_cache = compiled
+    _compiled_cache_mtime = mtime
     return compiled
 
 

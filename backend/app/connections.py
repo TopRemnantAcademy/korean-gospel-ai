@@ -30,6 +30,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from typing import Any, Optional
@@ -39,27 +40,63 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 # ─── 내부 레지스트리 ──────────────────────────────────────────────────────────
-_registry: dict[str, Any] = {}
+_registry: dict[tuple[str, Optional[asyncio.AbstractEventLoop]], Any] = {}
 _lock = threading.Lock()
 _SENTINEL = object()  # 초기화 시도했으나 실패한 항목 마킹용
+
+_http_client = None
+
+def http_client():
+    """전역 스레드세이프 pooled httpx.Client"""
+    global _http_client
+    if _http_client is None:
+        with _lock:
+            if _http_client is None:
+                import httpx
+                _http_client = httpx.Client(
+                    timeout=httpx.Timeout(60.0, connect=5.0),
+                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+                )
+    return _http_client
+
+def async_http_client():
+    """전역 스레드세이프 pooled httpx.AsyncClient (이벤트 루프별 독립)"""
+    def _factory():
+        import httpx
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=5.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+        )
+    return _once("async_http_client", _factory)
+
+
+def _registry_key(key: str) -> tuple[str, Optional[asyncio.AbstractEventLoop]]:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    return (key, loop)
 
 
 def _get(key: str):
     """레지스트리에서 값 조회. 없거나 _SENTINEL이면 None 반환."""
-    v = _registry.get(key, None)
+    reg_key = _registry_key(key)
+    v = _registry.get(reg_key, None)
     return None if v is _SENTINEL else v
 
 
 def _set(key: str, value: Any):
-    _registry[key] = value
+    reg_key = _registry_key(key)
+    _registry[reg_key] = value
 
 
 def _once(key: str, factory):
-    """Thread-safe 1회 초기화."""
-    if key in _registry:
+    """Thread-safe 1회 초기화 (이벤트 루프별 독립)."""
+    reg_key = _registry_key(key)
+    if reg_key in _registry:
         return _get(key)
     with _lock:
-        if key in _registry:
+        if reg_key in _registry:
             return _get(key)
         try:
             result = factory()
@@ -99,11 +136,12 @@ def deepseek():
         import httpx
         from openai import AsyncOpenAI  # type: ignore
         # connect=5s: 서버 자체에 연결 안 되면 즉시 실패 (무응답 빠른 감지)
-        # read=None: 응답이 느려도 완성될 때까지 무한 대기 (폴백 발동 안 함)
+        # read=llm_provider_timeout_sec+5s: 응답 지연 시 fallback 발동
+        _read_timeout = settings.llm_provider_timeout_sec + 5.0
         return AsyncOpenAI(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
-            timeout=httpx.Timeout(connect=5.0, read=None, write=10.0, pool=5.0),
+            timeout=httpx.Timeout(connect=5.0, read=_read_timeout, write=10.0, pool=5.0),
         )
 
     return _once("deepseek", _factory)
@@ -252,13 +290,14 @@ def status() -> dict:
       "active"      → 레지스트리에 살아있는 인스턴스 존재
       "missing"     → API 키 / URL 미설정
       "error"       → 초기화 시도했으나 실패
-      "disabled"    → 기능 플래그로 비활성화
+      "disabled"    → 설정에서 비활성화
     """
     def _state(key: str, has_key: bool) -> str:
         if not has_key:
             return "missing"
-        if key in _registry:
-            return "error" if _registry[key] is _SENTINEL else "active"
+        reg_key = _registry_key(key)
+        if reg_key in _registry:
+            return "error" if _registry[reg_key] is _SENTINEL else "active"
         return "ok"  # 키는 있으나 아직 lazy init 전 → 설정상 문제없음
 
     # qdrant: vector_store 수동 캐시 확인 (init 유발 없이 상태만 조회)
@@ -280,6 +319,8 @@ def status() -> dict:
         "openai":    _state("openai",    bool(settings.openai_api_key)),
         "anthropic": _state("anthropic", bool(settings.anthropic_api_key)),
         "ollama":    "ok",  # 로컬, 항상 설정됨 (실제 응답은 런타임에)
+        "tencent":   _state("tencent",  bool(settings.tencent_api_key)),
+        "nvidia":    _state("nvidia",    bool(settings.nvidia_api_key)),
         # ── VectorDB ──
         "qdrant":      _q_status,
         "qdrant_mode": qdrant_mode(),
@@ -307,7 +348,7 @@ def log_status():
     s = status()
     lines = ["[connections] API 연결 상태:"]
     groups = {
-        "LLM":      ["gemini", "deepseek", "openai", "anthropic", "ollama"],
+        "LLM":      ["gemini", "deepseek", "openai", "anthropic", "ollama", "tencent", "nvidia"],
         "VectorDB": ["qdrant", "qdrant_mode"],
         "Embedder": ["hf_inference", "voyage"],
         "Reranker": ["cohere"],
@@ -325,6 +366,51 @@ def log_status():
 
 # ─── 편의 싱글턴 ─────────────────────────────────────────────────────────────
 # `from ..connections import connections` 로 임포트 후 conn.gemini() 등으로 사용
+async def close_connections() -> None:
+    """Graceful shutdown: 전역 커넥션 풀/클라이언트 정리.
+
+    - sync httpx.Client 종료
+    - 레지스트리의 async 클라이언트/LLM SDK 클라이언트 aclose()
+    - Qdrant 클라이언트 close()
+    모든 close 는 best-effort(실패해도 무시) — 종료 중 예외가 전파되지 않도록.
+    """
+    global _http_client
+    if _http_client is not None:
+        try:
+            _http_client.close()
+        except Exception:
+            pass
+        _http_client = None
+
+    for _key, val in list(_registry.items()):
+        if val is _SENTINEL or val is None:
+            continue
+        close_fn = getattr(val, "aclose", None) or getattr(val, "close", None)
+        if callable(close_fn):
+            try:
+                res = close_fn()
+                if hasattr(res, "__await__"):
+                    await res
+            except Exception:
+                pass
+
+    try:
+        from .services import vector_store as _vs
+
+        inst = getattr(_vs, "_client_instance", None)
+        if inst is not None:
+            cfn = getattr(inst, "close", None) or getattr(inst, "aclose", None)
+            if callable(cfn):
+                try:
+                    r = cfn()
+                    if hasattr(r, "__await__"):
+                        await r
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 class _ConnectionRegistry:
     gemini = staticmethod(gemini)
     deepseek = staticmethod(deepseek)
@@ -338,6 +424,9 @@ class _ConnectionRegistry:
     langfuse = staticmethod(langfuse)
     status = staticmethod(status)
     log_status = staticmethod(log_status)
+    http_client = staticmethod(http_client)
+    async_http_client = staticmethod(async_http_client)
+    close_connections = staticmethod(close_connections)
 
 
 connections = _ConnectionRegistry()

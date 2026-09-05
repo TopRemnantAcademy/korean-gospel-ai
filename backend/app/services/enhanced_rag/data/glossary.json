@@ -1,0 +1,1346 @@
+{
+  "version": "v2",
+  "source_lang": "ko",
+  "target_langs": [
+    "zh",
+    "en"
+  ],
+  "description": "번역 용어집 — KO→ZH(简体)+EN. 채팅/문서 번역 프롬프트에 강제 주입되어 신학 용어 번역 일관성 보장. en 필드는 데이터만 준비(코드 주입은 추후).",
+  "terms": [
+    {
+      "ko": "D to All Nations Church",
+      "zh": "D to All Nation教会",
+      "en": "D to All Nations Church"
+    },
+    {
+      "ko": "구원",
+      "zh": "救恩",
+      "en": "salvation"
+    },
+    {
+      "ko": "칭의",
+      "zh": "称义",
+      "en": "justification"
+    },
+    {
+      "ko": "성화",
+      "zh": "成圣",
+      "en": "sanctification"
+    },
+    {
+      "ko": "중생",
+      "zh": "重生",
+      "en": "regeneration"
+    },
+    {
+      "ko": "속죄",
+      "zh": "赎罪",
+      "en": "atonement"
+    },
+    {
+      "ko": "대속",
+      "zh": "代赎",
+      "en": "substitutionary atonement"
+    },
+    {
+      "ko": "보혈",
+      "zh": "宝血",
+      "en": "precious blood"
+    },
+    {
+      "ko": "부활",
+      "zh": "复活",
+      "en": "resurrection"
+    },
+    {
+      "ko": "승천",
+      "zh": "升天",
+      "en": "ascension"
+    },
+    {
+      "ko": "재림",
+      "zh": "再临",
+      "en": "second coming"
+    },
+    {
+      "ko": "삼위일체",
+      "zh": "三位一体",
+      "en": "Trinity"
+    },
+    {
+      "ko": "성부",
+      "zh": "圣父",
+      "en": "God the Father"
+    },
+    {
+      "ko": "성자",
+      "zh": "圣子",
+      "en": "God the Son"
+    },
+    {
+      "ko": "성령",
+      "zh": "圣灵",
+      "en": "Holy Spirit"
+    },
+    {
+      "ko": "원죄",
+      "zh": "原罪",
+      "en": "original sin"
+    },
+    {
+      "ko": "총체적 타락",
+      "zh": "全然败坏",
+      "en": "total depravity"
+    },
+    {
+      "ko": "예정",
+      "zh": "预定",
+      "en": "predestination"
+    },
+    {
+      "ko": "선택",
+      "zh": "拣选",
+      "en": "election"
+    },
+    {
+      "ko": "언약",
+      "zh": "约",
+      "en": "covenant"
+    },
+    {
+      "ko": "율법",
+      "zh": "律法",
+      "en": "law"
+    },
+    {
+      "ko": "복음",
+      "zh": "福音",
+      "en": "gospel"
+    },
+    {
+      "ko": "속죄제",
+      "zh": "赎罪祭",
+      "en": "sin offering"
+    },
+    {
+      "ko": "중보",
+      "zh": "中保",
+      "en": "mediator"
+    },
+    {
+      "ko": "중보자",
+      "zh": "中保",
+      "en": "mediator"
+    },
+    {
+      "ko": "성육신",
+      "zh": "道成肉身",
+      "en": "incarnation"
+    },
+    {
+      "ko": "은사",
+      "zh": "恩赐",
+      "en": "spiritual gift"
+    },
+    {
+      "ko": "성례",
+      "zh": "圣礼",
+      "en": "ordinance"
+    },
+    {
+      "ko": "세례",
+      "zh": "洗礼",
+      "en": "baptism"
+    },
+    {
+      "ko": "성찬",
+      "zh": "圣餐",
+      "en": "Lord's Supper"
+    },
+    {
+      "ko": "성만찬",
+      "zh": "圣餐",
+      "en": "Lord's Supper"
+    },
+    {
+      "ko": "직분",
+      "zh": "职分",
+      "en": "office"
+    },
+    {
+      "ko": "안수",
+      "zh": "按手",
+      "en": "laying on of hands"
+    },
+    {
+      "ko": "교회",
+      "zh": "教会",
+      "en": "church"
+    },
+    {
+      "ko": "그리스도",
+      "zh": "基督",
+      "en": "Christ"
+    },
+    {
+      "ko": "메시아",
+      "zh": "弥赛亚",
+      "en": "Messiah"
+    },
+    {
+      "ko": "구속",
+      "zh": "救赎",
+      "en": "redemption"
+    },
+    {
+      "ko": "화해",
+      "zh": "和好",
+      "en": "reconciliation"
+    },
+    {
+      "ko": "의인",
+      "zh": "义人",
+      "en": "righteous person"
+    },
+    {
+      "ko": "의롭다",
+      "zh": "称义",
+      "en": "to be declared righteous"
+    },
+    {
+      "ko": "거룩",
+      "zh": "圣洁",
+      "en": "holy"
+    },
+    {
+      "ko": "영생",
+      "zh": "永生",
+      "en": "eternal life"
+    },
+    {
+      "ko": "심판",
+      "zh": "审判",
+      "en": "judgment"
+    },
+    {
+      "ko": "지옥",
+      "zh": "地狱",
+      "en": "hell"
+    },
+    {
+      "ko": "천국",
+      "zh": "天国",
+      "en": "kingdom of heaven"
+    },
+    {
+      "ko": "천당",
+      "zh": "天堂",
+      "en": "heaven"
+    },
+    {
+      "ko": "영광",
+      "zh": "荣耀",
+      "en": "glory"
+    },
+    {
+      "ko": "창조",
+      "zh": "创造",
+      "en": "creation"
+    },
+    {
+      "ko": "타락",
+      "zh": "堕落",
+      "en": "the Fall"
+    },
+    {
+      "ko": "신앙",
+      "zh": "信仰",
+      "en": "faith (belief)"
+    },
+    {
+      "ko": "믿음",
+      "zh": "信心",
+      "en": "faith"
+    },
+    {
+      "ko": "소망",
+      "zh": "盼望",
+      "en": "hope"
+    },
+    {
+      "ko": "사랑",
+      "zh": "爱",
+      "en": "love"
+    },
+    {
+      "ko": "전능",
+      "zh": "全能",
+      "en": "omnipotence"
+    },
+    {
+      "ko": "전지",
+      "zh": "全知",
+      "en": "omniscience"
+    },
+    {
+      "ko": "선하심",
+      "zh": "良善",
+      "en": "goodness"
+    },
+    {
+      "ko": "주권",
+      "zh": "主权",
+      "en": "sovereignty"
+    },
+    {
+      "ko": "임재",
+      "zh": "同在",
+      "en": "presence"
+    },
+    {
+      "ko": "진리",
+      "zh": "真理",
+      "en": "truth"
+    },
+    {
+      "ko": "구원자",
+      "zh": "救主",
+      "en": "Savior"
+    },
+    {
+      "ko": "구주",
+      "zh": "救主",
+      "en": "Savior"
+    },
+    {
+      "ko": "보혜사",
+      "zh": "保惠师",
+      "en": "Comforter"
+    },
+    {
+      "ko": "선한 목자",
+      "zh": "好牧人",
+      "en": "good shepherd"
+    },
+    {
+      "ko": "생명의 떡",
+      "zh": "生命之粮",
+      "en": "bread of life"
+    },
+    {
+      "ko": "예수",
+      "zh": "耶稣",
+      "en": "Jesus"
+    },
+    {
+      "ko": "하나님",
+      "zh": "神",
+      "en": "God"
+    },
+    {
+      "ko": "여호와",
+      "zh": "耶和华",
+      "en": "Jehovah"
+    },
+    {
+      "ko": "아버지",
+      "zh": "父",
+      "en": "Father"
+    },
+    {
+      "ko": "아브라함",
+      "zh": "亚伯拉罕",
+      "en": "Abraham"
+    },
+    {
+      "ko": "모세",
+      "zh": "摩西",
+      "en": "Moses"
+    },
+    {
+      "ko": "다윗",
+      "zh": "大卫",
+      "en": "David"
+    },
+    {
+      "ko": "바울",
+      "zh": "保罗",
+      "en": "Paul"
+    },
+    {
+      "ko": "베드로",
+      "zh": "彼得",
+      "en": "Peter"
+    },
+    {
+      "ko": "요한",
+      "zh": "约翰",
+      "en": "John"
+    },
+    {
+      "ko": "이사야",
+      "zh": "以赛亚",
+      "en": "Isaiah"
+    },
+    {
+      "ko": "예레미야",
+      "zh": "耶利米",
+      "en": "Jeremiah"
+    },
+    {
+      "ko": "야곱",
+      "zh": "雅各",
+      "en": "Jacob"
+    },
+    {
+      "ko": "사라",
+      "zh": "撒拉",
+      "en": "Sarah"
+    },
+    {
+      "ko": "마리아",
+      "zh": "马利亚",
+      "en": "Mary"
+    },
+    {
+      "ko": "요셉",
+      "zh": "约瑟",
+      "en": "Joseph"
+    },
+    {
+      "ko": "노아",
+      "zh": "挪亚",
+      "en": "Noah"
+    },
+    {
+      "ko": "솔로몬",
+      "zh": "所罗门",
+      "en": "Solomon"
+    },
+    {
+      "ko": "스데반",
+      "zh": "司提反",
+      "en": "Stephen"
+    },
+    {
+      "ko": "디모데",
+      "zh": "提摩太",
+      "en": "Timothy"
+    },
+    {
+      "ko": "누가",
+      "zh": "路加",
+      "en": "Luke"
+    },
+    {
+      "ko": "마가",
+      "zh": "马可",
+      "en": "Mark"
+    },
+    {
+      "ko": "마태",
+      "zh": "马太",
+      "en": "Matthew"
+    },
+    {
+      "ko": "야고보",
+      "zh": "雅各",
+      "en": "James"
+    },
+    {
+      "ko": "아담",
+      "zh": "亚当",
+      "en": "Adam"
+    },
+    {
+      "ko": "하와",
+      "zh": "夏娃",
+      "en": "Eve"
+    },
+    {
+      "ko": "가인",
+      "zh": "该隐",
+      "en": "Cain"
+    },
+    {
+      "ko": "아벨",
+      "zh": "亚伯",
+      "en": "Abel"
+    },
+    {
+      "ko": "이삭",
+      "zh": "以撒",
+      "en": "Isaac"
+    },
+    {
+      "ko": "엘리야",
+      "zh": "以利亚",
+      "en": "Elijah"
+    },
+    {
+      "ko": "엘리사",
+      "zh": "以利沙",
+      "en": "Elisha"
+    },
+    {
+      "ko": "다니엘",
+      "zh": "但以理",
+      "en": "Daniel"
+    },
+    {
+      "ko": "요나",
+      "zh": "约拿",
+      "en": "Jonah"
+    },
+    {
+      "ko": "사무엘",
+      "zh": "撒母耳",
+      "en": "Samuel"
+    },
+    {
+      "ko": "예루살렘",
+      "zh": "耶路撒冷",
+      "en": "Jerusalem"
+    },
+    {
+      "ko": "갈릴리",
+      "zh": "加利利",
+      "en": "Galilee"
+    },
+    {
+      "ko": "유대",
+      "zh": "犹太",
+      "en": "Judea"
+    },
+    {
+      "ko": "나사렛",
+      "zh": "拿撒勒",
+      "en": "Nazareth"
+    },
+    {
+      "ko": "베들레헴",
+      "zh": "伯利恒",
+      "en": "Bethlehem"
+    },
+    {
+      "ko": "가버나움",
+      "zh": "迦百农",
+      "en": "Capernaum"
+    },
+    {
+      "ko": "요단",
+      "zh": "约旦",
+      "en": "Jordan"
+    },
+    {
+      "ko": "시내산",
+      "zh": "西奈山",
+      "en": "Mount Sinai"
+    },
+    {
+      "ko": "에덴",
+      "zh": "伊甸园",
+      "en": "Eden"
+    },
+    {
+      "ko": "골고다",
+      "zh": "各各他",
+      "en": "Golgotha"
+    },
+    {
+      "ko": "감람산",
+      "zh": "橄榄山",
+      "en": "Mount of Olives"
+    },
+    {
+      "ko": "올리브산",
+      "zh": "橄榄山",
+      "en": "Mount of Olives"
+    },
+    {
+      "ko": "사마리아",
+      "zh": "撒玛利亚",
+      "en": "Samaria"
+    },
+    {
+      "ko": "안디옥",
+      "zh": "安提阿",
+      "en": "Antioch"
+    },
+    {
+      "ko": "로마",
+      "zh": "罗马",
+      "en": "Rome"
+    },
+    {
+      "ko": "에베소",
+      "zh": "以弗所",
+      "en": "Ephesus"
+    },
+    {
+      "ko": "고린도",
+      "zh": "哥林多",
+      "en": "Corinth"
+    },
+    {
+      "ko": "바벨론",
+      "zh": "巴比伦",
+      "en": "Babylon"
+    },
+    {
+      "ko": "소돔",
+      "zh": "所多玛",
+      "en": "Sodom"
+    },
+    {
+      "ko": "고모라",
+      "zh": "蛾摩拉",
+      "en": "Gomorrah"
+    },
+    {
+      "ko": "성경",
+      "zh": "圣经",
+      "en": "Bible"
+    },
+    {
+      "ko": "구약",
+      "zh": "旧约",
+      "en": "Old Testament"
+    },
+    {
+      "ko": "신약",
+      "zh": "新约",
+      "en": "New Testament"
+    },
+    {
+      "ko": "창세기",
+      "zh": "创世记",
+      "en": "Genesis"
+    },
+    {
+      "ko": "출애굽기",
+      "zh": "出埃及记",
+      "en": "Exodus"
+    },
+    {
+      "ko": "레위기",
+      "zh": "利未记",
+      "en": "Leviticus"
+    },
+    {
+      "ko": "민수기",
+      "zh": "民数记",
+      "en": "Numbers"
+    },
+    {
+      "ko": "신명기",
+      "zh": "申命记",
+      "en": "Deuteronomy"
+    },
+    {
+      "ko": "여호수아서",
+      "zh": "约书亚记",
+      "en": "Joshua"
+    },
+    {
+      "ko": "사사기",
+      "zh": "士师记",
+      "en": "Judges"
+    },
+    {
+      "ko": "룻기",
+      "zh": "路得记",
+      "en": "Ruth"
+    },
+    {
+      "ko": "사무엘상",
+      "zh": "撒母耳记上",
+      "en": "1 Samuel"
+    },
+    {
+      "ko": "사무엘하",
+      "zh": "撒母耳记下",
+      "en": "2 Samuel"
+    },
+    {
+      "ko": "열왕기상",
+      "zh": "列王纪上",
+      "en": "1 Kings"
+    },
+    {
+      "ko": "열왕기하",
+      "zh": "列王纪下",
+      "en": "2 Kings"
+    },
+    {
+      "ko": "역대상",
+      "zh": "历代志上",
+      "en": "1 Chronicles"
+    },
+    {
+      "ko": "역대하",
+      "zh": "历代志下",
+      "en": "2 Chronicles"
+    },
+    {
+      "ko": "에스라",
+      "zh": "以斯拉记",
+      "en": "Ezra"
+    },
+    {
+      "ko": "느헤미야",
+      "zh": "尼希米记",
+      "en": "Nehemiah"
+    },
+    {
+      "ko": "에스더",
+      "zh": "以斯帖记",
+      "en": "Esther"
+    },
+    {
+      "ko": "욥기",
+      "zh": "约伯记",
+      "en": "Job"
+    },
+    {
+      "ko": "시편",
+      "zh": "诗篇",
+      "en": "Psalms"
+    },
+    {
+      "ko": "잠언",
+      "zh": "箴言",
+      "en": "Proverbs"
+    },
+    {
+      "ko": "전도서",
+      "zh": "传道书",
+      "en": "Ecclesiastes"
+    },
+    {
+      "ko": "아가",
+      "zh": "雅歌",
+      "en": "Song of Songs"
+    },
+    {
+      "ko": "이사야서",
+      "zh": "以赛亚书",
+      "en": "Isaiah"
+    },
+    {
+      "ko": "예레미야서",
+      "zh": "耶利米书",
+      "en": "Jeremiah"
+    },
+    {
+      "ko": "예레미야애가",
+      "zh": "耶利米哀歌",
+      "en": "Lamentations"
+    },
+    {
+      "ko": "에스겔",
+      "zh": "以西结书",
+      "en": "Ezekiel"
+    },
+    {
+      "ko": "다니엘서",
+      "zh": "但以理书",
+      "en": "Daniel"
+    },
+    {
+      "ko": "호세아",
+      "zh": "何西阿书",
+      "en": "Hosea"
+    },
+    {
+      "ko": "요엘",
+      "zh": "约珥书",
+      "en": "Joel"
+    },
+    {
+      "ko": "아모스",
+      "zh": "阿摩司书",
+      "en": "Amos"
+    },
+    {
+      "ko": "오바댜",
+      "zh": "俄巴底亚书",
+      "en": "Obadiah"
+    },
+    {
+      "ko": "요나서",
+      "zh": "约拿书",
+      "en": "Jonah"
+    },
+    {
+      "ko": "미가",
+      "zh": "弥迦书",
+      "en": "Micah"
+    },
+    {
+      "ko": "나훔",
+      "zh": "那鸿书",
+      "en": "Nahum"
+    },
+    {
+      "ko": "하박국",
+      "zh": "哈巴谷书",
+      "en": "Habakkuk"
+    },
+    {
+      "ko": "스바냐",
+      "zh": "西番雅书",
+      "en": "Zephaniah"
+    },
+    {
+      "ko": "학개",
+      "zh": "哈该书",
+      "en": "Haggai"
+    },
+    {
+      "ko": "스가랴",
+      "zh": "撒迦利亚书",
+      "en": "Zechariah"
+    },
+    {
+      "ko": "말라기",
+      "zh": "玛拉基书",
+      "en": "Malachi"
+    },
+    {
+      "ko": "마태복음",
+      "zh": "马太福音",
+      "en": "Matthew"
+    },
+    {
+      "ko": "마가복음",
+      "zh": "马可福音",
+      "en": "Mark"
+    },
+    {
+      "ko": "누가복음",
+      "zh": "路加福音",
+      "en": "Luke"
+    },
+    {
+      "ko": "요한복음",
+      "zh": "约翰福音",
+      "en": "John"
+    },
+    {
+      "ko": "사도행전",
+      "zh": "使徒行传",
+      "en": "Acts"
+    },
+    {
+      "ko": "로마서",
+      "zh": "罗马书",
+      "en": "Romans"
+    },
+    {
+      "ko": "고린도전서",
+      "zh": "哥林多前书",
+      "en": "1 Corinthians"
+    },
+    {
+      "ko": "고린도후서",
+      "zh": "哥林多后书",
+      "en": "2 Corinthians"
+    },
+    {
+      "ko": "갈라디아서",
+      "zh": "加拉太书",
+      "en": "Galatians"
+    },
+    {
+      "ko": "에베소서",
+      "zh": "以弗所书",
+      "en": "Ephesians"
+    },
+    {
+      "ko": "빌립보서",
+      "zh": "腓立比书",
+      "en": "Philippians"
+    },
+    {
+      "ko": "골로새서",
+      "zh": "歌罗西书",
+      "en": "Colossians"
+    },
+    {
+      "ko": "데살로니가전서",
+      "zh": "帖撒罗尼迦前书",
+      "en": "1 Thessalonians"
+    },
+    {
+      "ko": "데살로니가후서",
+      "zh": "帖撒罗尼迦后书",
+      "en": "2 Thessalonians"
+    },
+    {
+      "ko": "디모데전서",
+      "zh": "提摩太前书",
+      "en": "1 Timothy"
+    },
+    {
+      "ko": "디모데후서",
+      "zh": "提摩太后书",
+      "en": "2 Timothy"
+    },
+    {
+      "ko": "디도서",
+      "zh": "提多书",
+      "en": "Titus"
+    },
+    {
+      "ko": "빌레몬서",
+      "zh": "腓利门书",
+      "en": "Philemon"
+    },
+    {
+      "ko": "히브리서",
+      "zh": "希伯来书",
+      "en": "Hebrews"
+    },
+    {
+      "ko": "야고보서",
+      "zh": "雅各书",
+      "en": "James"
+    },
+    {
+      "ko": "베드로전서",
+      "zh": "彼得前书",
+      "en": "1 Peter"
+    },
+    {
+      "ko": "베드로후서",
+      "zh": "彼得后书",
+      "en": "2 Peter"
+    },
+    {
+      "ko": "요한일서",
+      "zh": "约翰一书",
+      "en": "1 John"
+    },
+    {
+      "ko": "요한이서",
+      "zh": "约翰二书",
+      "en": "2 John"
+    },
+    {
+      "ko": "요한삼서",
+      "zh": "约翰三书",
+      "en": "3 John"
+    },
+    {
+      "ko": "유다서",
+      "zh": "犹大书",
+      "en": "Jude"
+    },
+    {
+      "ko": "요한계시록",
+      "zh": "启示录",
+      "en": "Revelation"
+    },
+    {
+      "ko": "홍해",
+      "zh": "红海",
+      "en": "Red Sea"
+    },
+    {
+      "ko": "출애굽",
+      "zh": "出埃及",
+      "en": "Exodus"
+    },
+    {
+      "ko": "바벨탑",
+      "zh": "巴别塔",
+      "en": "Tower of Babel"
+    },
+    {
+      "ko": "바벨론 포로",
+      "zh": "巴比伦被掳",
+      "en": "Babylonian captivity"
+    },
+    {
+      "ko": "십자가",
+      "zh": "十字架",
+      "en": "cross"
+    },
+    {
+      "ko": "부활절",
+      "zh": "复活节",
+      "en": "Resurrection"
+    },
+    {
+      "ko": "오순절",
+      "zh": "五旬节",
+      "en": "Pentecost"
+    },
+    {
+      "ko": "종교개혁",
+      "zh": "宗教改革",
+      "en": "Reformation"
+    },
+    {
+      "ko": "회개",
+      "zh": "悔改",
+      "en": "repentance"
+    },
+    {
+      "ko": "예배",
+      "zh": "敬拜",
+      "en": "worship"
+    },
+    {
+      "ko": "기도",
+      "zh": "祷告",
+      "en": "prayer"
+    },
+    {
+      "ko": "찬양",
+      "zh": "赞美",
+      "en": "praise"
+    },
+    {
+      "ko": "전도",
+      "zh": "传福音",
+      "en": "evangelism"
+    },
+    {
+      "ko": "말씀",
+      "zh": "神的话",
+      "en": "word of God"
+    },
+    {
+      "ko": "큐티",
+      "zh": "灵修",
+      "en": "quiet time"
+    },
+    {
+      "ko": "주일",
+      "zh": "主日",
+      "en": "Lord's Day"
+    },
+    {
+      "ko": "안식일",
+      "zh": "安息日",
+      "en": "Sabbath"
+    },
+    {
+      "ko": "십일조",
+      "zh": "什一",
+      "en": "tithe"
+    },
+    {
+      "ko": "헌신",
+      "zh": "奉献",
+      "en": "dedication"
+    },
+    {
+      "ko": "봉사",
+      "zh": "事奉",
+      "en": "service"
+    },
+    {
+      "ko": "교제",
+      "zh": "团契",
+      "en": "fellowship"
+    },
+    {
+      "ko": "사귐",
+      "zh": "团契",
+      "en": "fellowship"
+    },
+    {
+      "ko": "중보기도",
+      "zh": "代祷",
+      "en": "intercessory prayer"
+    },
+    {
+      "ko": "금식",
+      "zh": "禁食",
+      "en": "fasting"
+    },
+    {
+      "ko": "겸손",
+      "zh": "谦卑",
+      "en": "humility"
+    },
+    {
+      "ko": "순종",
+      "zh": "顺服",
+      "en": "obedience"
+    },
+    {
+      "ko": "인내",
+      "zh": "忍耐",
+      "en": "perseverance"
+    },
+    {
+      "ko": "온유",
+      "zh": "温柔",
+      "en": "gentleness"
+    },
+    {
+      "ko": "절제",
+      "zh": "节制",
+      "en": "self-control"
+    },
+    {
+      "ko": "충성",
+      "zh": "忠心",
+      "en": "faithfulness"
+    },
+    {
+      "ko": "감사",
+      "zh": "感恩",
+      "en": "thanksgiving"
+    },
+    {
+      "ko": "위로",
+      "zh": "安慰",
+      "en": "comfort"
+    },
+    {
+      "ko": "평안",
+      "zh": "平安",
+      "en": "peace"
+    },
+    {
+      "ko": "용서",
+      "zh": "饶恕",
+      "en": "forgiveness"
+    },
+    {
+      "ko": "회복",
+      "zh": "恢复",
+      "en": "restoration"
+    },
+    {
+      "ko": "시험",
+      "zh": "试探",
+      "en": "temptation"
+    },
+    {
+      "ko": "연단",
+      "zh": "熬炼",
+      "en": "refinement"
+    },
+    {
+      "ko": "고난",
+      "zh": "苦难",
+      "en": "suffering"
+    },
+    {
+      "ko": "환난",
+      "zh": "患难",
+      "en": "tribulation"
+    },
+    {
+      "ko": "핍박",
+      "zh": "逼迫",
+      "en": "persecution"
+    },
+    {
+      "ko": "소명",
+      "zh": "呼召",
+      "en": "calling"
+    },
+    {
+      "ko": "사명",
+      "zh": "使命",
+      "en": "mission"
+    },
+    {
+      "ko": "제자",
+      "zh": "门徒",
+      "en": "disciple"
+    },
+    {
+      "ko": "사도",
+      "zh": "使徒",
+      "en": "apostle"
+    },
+    {
+      "ko": "선지자",
+      "zh": "先知",
+      "en": "prophet"
+    },
+    {
+      "ko": "제사장",
+      "zh": "祭司",
+      "en": "priest"
+    },
+    {
+      "ko": "왕",
+      "zh": "君王",
+      "en": "king"
+    },
+    {
+      "ko": "천사",
+      "zh": "天使",
+      "en": "angel"
+    },
+    {
+      "ko": "악마",
+      "zh": "魔鬼",
+      "en": "devil"
+    },
+    {
+      "ko": "사탄",
+      "zh": "撒但",
+      "en": "Satan"
+    },
+    {
+      "ko": "죄인",
+      "zh": "罪人",
+      "en": "sinner"
+    },
+    {
+      "ko": "성도",
+      "zh": "圣徒",
+      "en": "saint"
+    },
+    {
+      "ko": "목자",
+      "zh": "牧者",
+      "en": "shepherd"
+    },
+    {
+      "ko": "감독",
+      "zh": "监督",
+      "en": "overseer"
+    },
+    {
+      "ko": "집사",
+      "zh": "执事",
+      "en": "deacon"
+    },
+    {
+      "ko": "장로",
+      "zh": "长老",
+      "en": "elder"
+    },
+    {
+      "ko": "전도자",
+      "zh": "传道人",
+      "en": "evangelist"
+    },
+    {
+      "ko": "교사",
+      "zh": "教师",
+      "en": "teacher"
+    },
+    {
+      "ko": "설교",
+      "zh": "讲道",
+      "en": "sermon"
+    },
+    {
+      "ko": "성가",
+      "zh": "诗歌",
+      "en": "hymn"
+    },
+    {
+      "ko": "간증",
+      "zh": "见证",
+      "en": "testimony"
+    },
+    {
+      "ko": "치유",
+      "zh": "医治",
+      "en": "healing"
+    },
+    {
+      "ko": "중독",
+      "zh": "成瘾",
+      "en": "addiction"
+    },
+    {
+      "ko": "우울",
+      "zh": "抑郁",
+      "en": "depression"
+    },
+    {
+      "ko": "불안",
+      "zh": "焦虑",
+      "en": "anxiety"
+    },
+    {
+      "ko": "외로움",
+      "zh": "孤独",
+      "en": "loneliness"
+    },
+    {
+      "ko": "죄책감",
+      "zh": "罪疚",
+      "en": "guilt"
+    },
+    {
+      "ko": "자살",
+      "zh": "自杀",
+      "en": "suicide"
+    },
+    {
+      "ko": "가정",
+      "zh": "家庭",
+      "en": "family"
+    },
+    {
+      "ko": "이혼",
+      "zh": "离婚",
+      "en": "divorce"
+    },
+    {
+      "ko": "관계",
+      "zh": "关系",
+      "en": "relationship"
+    },
+    {
+      "ko": "상처",
+      "zh": "创伤",
+      "en": "wound"
+    },
+    {
+      "ko": "트라우마",
+      "zh": "创伤",
+      "en": "trauma"
+    },
+    {
+      "ko": "버림받음",
+      "zh": "被弃",
+      "en": "abandonment"
+    },
+    {
+      "ko": "분노",
+      "zh": "愤怒",
+      "en": "anger"
+    },
+    {
+      "ko": "두려움",
+      "zh": "恐惧",
+      "en": "fear"
+    },
+    {
+      "ko": "절망",
+      "zh": "绝望",
+      "en": "despair"
+    },
+    {
+      "ko": "혼란",
+      "zh": "混乱",
+      "en": "confusion"
+    },
+    {
+      "ko": "용기",
+      "zh": "勇气",
+      "en": "courage"
+    },
+    {
+      "ko": "희망",
+      "zh": "盼望",
+      "en": "hope"
+    }
+  ]
+}

@@ -5,9 +5,7 @@
 
 사용법 (내부 자동):
     terms = extract_terms(text)  # → list[str]
-
-사용법 (API):
-    result = await run_cleanup(text)  # 하위 호환 유지
+    meta  = extract_metadata(text)  # → {"scripture_refs": [...], "topic_tags": [...]}
 """
 # =============================================================================
 # 🔧 AI-AGENT-WORK
@@ -24,7 +22,6 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass, field
 
 
 # ── 신학 핵심 용어 화이트리스트 ───────────────────────────────────────────────
@@ -73,18 +70,6 @@ def _is_valid_scripture(ref: str) -> bool:
     if book not in _BIBLE_BOOKS:
         return False
     return chap >= 1 and verse >= 1
-
-
-@dataclass
-class CleanupResult:
-    """하위 호환 유지용 — API 응답 구조 동일하게 유지."""
-    original_text: str
-    final_text: str          # 텍스트 변경 없음 (원본 그대로)
-    stage_texts: dict = field(default_factory=dict)
-    diffs: list = field(default_factory=list)
-    warnings: list = field(default_factory=list)
-    terms_found: list[str] = field(default_factory=list)
-    theology_violations: list = field(default_factory=list)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -150,20 +135,3 @@ def extract_metadata(text: str) -> dict:
     tags = [t for t, _ in tag_counts[:12]]
 
     return {"scripture_refs": refs, "topic_tags": tags}
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 하위 호환 API (documents.py /cleanup 엔드포인트가 호출)
-# ═══════════════════════════════════════════════════════════════════════════
-
-async def run_cleanup(
-    text: str,
-    stages: list[int] | None = None,
-) -> CleanupResult:
-    """텍스트 변경 없이 용어만 추출. stages 인자는 무시 (하위 호환 유지)."""
-    terms = extract_terms(text)
-    return CleanupResult(
-        original_text=text,
-        final_text=text,   # 원본 그대로 — 수정 없음
-        terms_found=terms,
-    )

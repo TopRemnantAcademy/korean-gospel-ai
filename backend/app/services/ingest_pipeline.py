@@ -8,10 +8,13 @@ publish_service 가 이 모듈의 build_index_chunks() 를 호출한다.
       → Stage 1 정규화 (normalizer)         [규칙, ingest_normalize_enabled]
       → Stage 2 구조화 (restructurer)        [LLM,  ingest_restructure_enabled]
       → Stage 3 청킹 (chunker, 토큰+헤딩)    [항상]
-      → Stage 4 컨텍스트 강화 (contextualizer)[LLM,  ingest_contextual_enabled]
       → Stage 5 메타추출 (cleanup_pipeline)  [규칙]
       → Stage 7 품질 게이트 (quality_gate)   [규칙, ingest_quality_gate_enabled]
+      → Stage 4 컨텍스트 강화 (contextualizer)[LLM,  ingest_contextual_enabled]
     → IngestResult(chunks, embed_texts, metadatas_extra, report)
+
+    (실제 실행 순서 기준. 품질게이트는 원문 청크를 대상으로 먼저 실행되어
+     차단 시 LLM 컨텍스트강화 비용을 절약하고, 임베딩은 맥락강화본으로 수행)
 
 동기 함수: publish_service 가 스레드 풀에서 호출하므로 LLM 호출은 내부에서
           asyncio 이벤트 루프를 안전하게 확보해 실행한다.
@@ -76,6 +79,11 @@ def build_index_chunks(
 
     text = body
 
+    # ── Stage 0.5: 청킹 선행 정규화 (ZZ-1 단어결합 + ZZ-3 마침표) ─────────────────
+    if settings.ingest_normalize_enabled:
+        text = normalizer.preprocess_for_chunking(text)
+        report["stages"].append("preprocess_spacing")
+
     # ── Stage 1: 정규화 (규칙) ───────────────────────────────────────────────
     if settings.ingest_normalize_enabled:
         text = normalizer.normalize_text(text, remove_fillers=True)
@@ -95,7 +103,13 @@ def build_index_chunks(
             warnings.append(f"restructure 실패: {e}")
 
     # ── Stage 3: 청킹 (토큰 + 헤딩, 항상) ────────────────────────────────────
-    chunks = chunk_text(text)
+    chunks = chunk_text(
+        text,
+        target_tokens=settings.ingest_chunk_target_tokens,
+        max_tokens=settings.ingest_chunk_max_tokens,
+        min_tokens=settings.ingest_chunk_min_tokens,
+        overlap_sentences=settings.ingest_chunk_overlap,  # 취약점 4: 설정값 전달
+    )
     report["stages"].append(f"chunk({len(chunks)})")
 
     # ── Stage 5: 메타데이터 추출 (규칙) ──────────────────────────────────────

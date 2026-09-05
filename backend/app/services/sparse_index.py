@@ -13,9 +13,10 @@ embedded Qdrant 가 BM42 sparse 를 지원하지 않으므로, 앱 레벨에서 
 from __future__ import annotations
 
 import logging
+import heapq
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,10 @@ logger = logging.getLogger(__name__)
 _kiwi = None
 _kiwi_lock = threading.Lock()
 
-# BM25 에 의미있는 품사만 사용 (명사/동사/형용사 어간/고유명사/외국어/숫자/한자)
-_KEEP_TAGS = ("N", "V", "XR", "SL", "SN", "SH", "MAG")
+# BM25 에 의미있는 품사만 사용
+# [FIX #23] "N" (명사 전체) 대신 구체적 태그로 세분화하여 의존명사(NNB,NNBC: '것','수','때' 등) 제외
+# NNG=일반명사, NNP=고유명사, NR=수사 — NNB(의존명사), NNBC(단위의존명사)는 노이즈이므로 제외
+_KEEP_TAGS = ("NNG", "NNP", "NR", "V", "XR", "SL", "SN", "SH", "MAG")
 
 # 성경 장절 패턴 (요 3:16, 로마서 5:8) — 토큰으로 통째 보존
 _VERSE_RE = re.compile(r"[가-힣A-Za-z]{1,8}\s*\d{1,3}:\d{1,3}")
@@ -79,7 +82,7 @@ class BM25Index:
     """단일 컬렉션의 메모리 BM25 인덱스."""
 
     def __init__(self):
-        self._entries: list[_IndexEntry] = []
+        self._entries: dict[str, _IndexEntry] = {}
         self._bm25 = None              # rank_bm25.BM25Okapi
         self._dirty = False
         self._lock = threading.RLock()
@@ -89,27 +92,23 @@ class BM25Index:
         if not self._entries:
             self._bm25 = None
             return
-        corpus = [e.tokens for e in self._entries]
+        corpus = [e.tokens for e in self._entries.values()]
         self._bm25 = BM25Okapi(corpus)
         self._dirty = False
 
     def add(self, chunk_id: str, text: str, payload: dict):
-        """청크 1개 추가 (중복 id 는 교체)."""
+        """청크 1개 추가 (중복 id 는 O(1) 교체)."""
         with self._lock:
             toks = tokenize(text)
-            # 기존 id 제거 후 추가 (재발행 대응)
-            self._entries = [e for e in self._entries if e.chunk_id != chunk_id]
-            self._entries.append(_IndexEntry(chunk_id=chunk_id, tokens=toks, payload=payload))
+            self._entries[chunk_id] = _IndexEntry(chunk_id=chunk_id, tokens=toks, payload=payload)
             self._dirty = True
 
     def add_batch(self, items: list[tuple[str, str, dict]]):
         """[(chunk_id, text, payload), ...] 일괄 추가."""
         with self._lock:
-            new_ids = {it[0] for it in items}
-            self._entries = [e for e in self._entries if e.chunk_id not in new_ids]
             for cid, text, payload in items:
-                self._entries.append(
-                    _IndexEntry(chunk_id=cid, tokens=tokenize(text), payload=payload)
+                self._entries[cid] = _IndexEntry(
+                    chunk_id=cid, tokens=tokenize(text), payload=payload
                 )
             self._dirty = True
 
@@ -117,7 +116,9 @@ class BM25Index:
         """predicate(payload)->bool 인 항목 제거. 제거 수 반환."""
         with self._lock:
             before = len(self._entries)
-            self._entries = [e for e in self._entries if not predicate(e.payload)]
+            self._entries = {
+                cid: e for cid, e in self._entries.items() if not predicate(e.payload)
+            }
             removed = before - len(self._entries)
             if removed:
                 self._dirty = True
@@ -125,21 +126,21 @@ class BM25Index:
 
     def search(self, query: str, top_k: int = 20) -> list[tuple[str, float, dict]]:
         """BM25 검색 → [(chunk_id, score, payload), ...] (score 내림차순)."""
+        # [PERF] Kiwi 토크나이즈(CPU-heavy)는 락 밖에서 실행 — 인덱스 상태와 무관.
+        q_tokens = tokenize(query)
+        if not q_tokens:
+            return []
         with self._lock:
             if self._dirty or self._bm25 is None:
                 self._rebuild_bm25()
             if self._bm25 is None or not self._entries:
                 return []
-            q_tokens = tokenize(query)
-            if not q_tokens:
-                return []
             scores = self._bm25.get_scores(q_tokens)
-            ranked = sorted(
-                zip(self._entries, scores), key=lambda x: x[1], reverse=True
-            )[:top_k]
+            # [PERF] 전체 정렬(O(N log N)) 대신 top-k 힙(O(N log k)) 사용.
+            top = heapq.nlargest(top_k, zip(self._entries.values(), scores), key=lambda x: x[1])
             return [
                 (e.chunk_id, float(s), e.payload)
-                for e, s in ranked if s > 0
+                for e, s in top if s > 0
             ]
 
     def size(self) -> int:
