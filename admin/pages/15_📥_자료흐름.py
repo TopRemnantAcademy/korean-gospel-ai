@@ -25,12 +25,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from lib.ui_components import stepper, empty_state, draft_status_badge
 
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
-ADMIN_TOKEN = os.getenv("ADMIN_API_KEY", "local-admin-key")
+ADMIN_TOKEN = os.getenv("ADMIN_API_KEY", "change-me")
 HEADERS = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
-st.set_page_config(page_title="자료 흐름", page_icon="📥", layout="wide")
 st.title("📥 자료 처리 흐름 (통합)")
-st.caption("Upload → 정제(Cleanup) → 용어검토(Glossary) → Publish — 한 화면에서 처리")
+st.caption("Upload → 정제(Cleanup) → 검증(Validate) → Publish — 한 화면에서 처리")
 
 
 def _api(method: str, path: str, **kwargs):
@@ -54,7 +53,7 @@ docs = _load_docs()
 non_published = [d for d in docs if d.get("latest_state") not in ("published",)]
 published = [d for d in docs if d.get("latest_state") == "published"]
 
-view_mode = st.sidebar.radio("보기", ["진행 중인 자료", "발행 완료"], horizontal=True)
+view_mode = st.sidebar.radio("보기", ["진행 중인 자료", "발행 완료"], horizontal=False)
 target_list = non_published if view_mode == "진행 중인 자료" else published
 
 if not target_list:
@@ -91,13 +90,13 @@ ver_id = latest_ver["version_id"]
 ver_state = latest_ver["state"]
 
 # ── Stepper ──────────────────────────────────────────────────────────────────
-STAGES = ["업로드", "정제", "용어검토", "검증", "발행"]
+STAGES = ["업로드", "정제", "검증", "발행"]
 STAGE_MAP = {
     "draft": 1,
-    "validated": 3,
-    "published": 4,
-    "superseded": 4,
-    "archived": 4,
+    "validated": 2,
+    "published": 3,
+    "superseded": 3,
+    "archived": 3,
 }
 current_stage = STAGE_MAP.get(ver_state, 0)
 
@@ -106,8 +105,8 @@ stepper(STAGES, current_stage)
 st.markdown("---")
 
 # ── 단계별 작업 패널 ──────────────────────────────────────────────────────────
-tab_info, tab_cleanup, tab_glossary, tab_validate, tab_publish = st.tabs(
-    ["📄 정보", "✨ 정제", "📚 용어", "✅ 검증", "🚀 발행"]
+tab_info, tab_cleanup, tab_validate, tab_publish = st.tabs(
+    ["📄 정보", "✨ 정제", "✅ 검증", "🚀 발행"]
 )
 
 
@@ -139,6 +138,11 @@ with tab_info:
     body_preview = latest_ver.get("body_patch") or latest_ver.get("extracted_text_preview", "")
     st.text_area("", value=body_preview[:800], height=200, disabled=True)
 
+    st.info(
+        "💡 신학 용어의 중국어/영어 대응어는 별도 **[번역 용어집](14_📚_용어집)** "
+        "페이지에서 관리합니다. (자동 추출 용어집은 제거됨)"
+    )
+
 
 # Tab 2: 정제
 with tab_cleanup:
@@ -147,9 +151,9 @@ with tab_cleanup:
     else:
         stages_sel = st.multiselect(
             "실행 Stage",
-            [1, 2, 3, 4, 5],
-            default=[1, 2, 3, 4, 5],
-            format_func=lambda x: {1: "정규화", 2: "오타", 3: "맥락", 4: "신학검증", 5: "용어추출"}.get(x, str(x)),
+            [1, 2, 3, 4],
+            default=[1, 2, 3, 4],
+            format_func=lambda x: {1: "정규화", 2: "오타", 3: "맥락", 4: "신학검증"}.get(x, str(x)),
         )
         dry_run = st.checkbox("Dry-run (미리보기)", value=True)
 
@@ -176,33 +180,7 @@ with tab_cleanup:
                 st.error("정제 실패")
 
 
-# Tab 3: 용어 검토
-with tab_glossary:
-    st.caption("이 자료 publish 시 자동으로 용어가 추출됩니다. 아래는 현재 대기 중인 전체 용어입니다.")
-    pend_r = _api("get", "/glossary/pending?limit=20")
-    pending = pend_r.json() if pend_r else []
-    if not pending:
-        st.success("검토 대기 용어 없음 ✅")
-    else:
-        st.caption(f"대기 {len(pending)}개 — [용어집 페이지](14_📚_용어집)에서 전체 관리")
-        for item in pending[:10]:
-            cols = st.columns([3, 1, 1, 1])
-            cols[0].markdown(f"**{item['term']}** ({item['frequency_count']}회)")
-            if cols[1].button("✅", key=f"g_approve_{item['id']}"):
-                _api("post", f"/glossary/{item['id']}/approve", json={"is_theology": False})
-                st.cache_data.clear()
-                st.rerun()
-            if cols[2].button("🕊", key=f"g_theol_{item['id']}"):
-                _api("post", f"/glossary/{item['id']}/approve", json={"is_theology": True})
-                st.cache_data.clear()
-                st.rerun()
-            if cols[3].button("🗑", key=f"g_reject_{item['id']}"):
-                _api("post", f"/glossary/{item['id']}/reject")
-                st.cache_data.clear()
-                st.rerun()
-
-
-# Tab 4: 검증
+# Tab 3: 검증
 with tab_validate:
     if st.button("🔍 검증 실행", type="primary"):
         with st.spinner("검증 중..."):
@@ -221,7 +199,7 @@ with tab_validate:
             st.error("검증 요청 실패")
 
 
-# Tab 5: 발행
+# Tab 4: 발행
 with tab_publish:
     if ver_state == "published":
         st.success("✅ 이미 발행된 자료입니다.")

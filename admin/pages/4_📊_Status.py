@@ -1,4 +1,4 @@
-"""📊 모니터링 — 시스템 현황 + 에러 로그 + 구독 현황."""
+"""📊 모니터링 — 시스템 현황 + 에러 로그."""
 from __future__ import annotations
 
 import sys
@@ -19,28 +19,219 @@ from dotenv import load_dotenv
 load_dotenv(_ROOT / ".env")
 
 from admin.lib.api_client import (
-    get_collections, list_documents, run_regression,
-    get_errors, get_error_stats, get_subscription_stats,
+    get_collections, list_documents,
+    get_errors, get_error_stats,
+    get_services_health,
+    bot_stats, bot_list, bot_toggle_flag,
 )
 from admin.lib.auth import gate
 
-gate(os.getenv("APP_PASSWORD", ""))
-
+# set_page_config MUST be the first Streamlit command on the page.
+# gate() issues st.* commands, so it runs AFTER this call.
 st.set_page_config(page_title="모니터링", page_icon="📊", layout="wide")
+gate(os.getenv("APP_PASSWORD", ""))
 st.title("📊 모니터링")
+
+
+# ── VA-2: 봇 관리 헬퍼 (12_🤖_봇관리.py 에서 통합) ──────────────────────────────
+def _bot_score_color(score: float) -> str:
+    if score >= 0.7:
+        return "bot-score-high"
+    elif score >= 0.4:
+        return "bot-score-mid"
+    return "bot-score-low"
+
+
+def _bot_score_label(score: float) -> str:
+    if score >= 0.7:
+        return "🔴 높음"
+    elif score >= 0.4:
+        return "🟡 중간"
+    return "🟢 낮음"
+
+
+def _bot_badge(flagged: bool, score: float) -> str:
+    if flagged:
+        return '<span class="bot-badge-flagged">🚫 봇 차단</span>'
+    elif score >= 0.5:
+        return '<span class="bot-badge-suspicious">⚠️ 의심</span>'
+    return '<span class="bot-badge-clean">✅ 정상</span>'
+
+
+def _bot_user_label(users: list, sid: str) -> str:
+    u = next((x for x in users if x["subscriber_id"] == sid), None)
+    if not u:
+        return sid
+    name = u.get("display_name") or u["subscriber_id"][:12]
+    q = u.get("total_questions", 0)
+    score = u.get("bot_score", 0)
+    flag = "🚫" if u.get("flagged_as_bot") else ("⚠️" if score >= 0.5 else "  ")
+    return f"{flag} {name}  ·  Q:{q}회  ·  점수:{score:.2f}"
+
+
+def _bot_render_user_detail(selected_sid: str, users: list) -> None:
+    user = next((u for u in users if u["subscriber_id"] == selected_sid), None)
+    if not user:
+        return
+    score_val = float(user.get("bot_score", 0) or 0)
+    is_flagged = bool(user.get("flagged_as_bot", False))
+
+    col_l, col_r = st.columns([1.5, 1])
+    with col_l:
+        st.markdown("#### 사용자 정보")
+        st.write(f"**ID:** `{selected_sid}`")
+        st.write(f"**이름:** {user.get('display_name') or '—'}")
+        st.write(f"**총 질문:** {user.get('total_questions', 0)}회")
+        st.write(f"**구원 상태:** {user.get('salvation_status') or '—'}")
+        first = (user.get("first_seen_at") or "")[:19].replace("T", " ")
+        last = (user.get("last_active_at") or "")[:19].replace("T", " ")
+        st.write(f"**첫 방문:** {first or '—'}")
+        st.write(f"**최근 활동:** {last or '—'}")
+
+        st.markdown("#### 봇 상태")
+        st.markdown(
+            f"**플래그:** {_bot_badge(is_flagged, score_val)}  \n"
+            f"**봇 점수:** <span class='{_bot_score_color(score_val)}'>{score_val:.4f}</span> "
+            f"({_bot_score_label(score_val)})",
+            unsafe_allow_html=True,
+        )
+
+    with col_r:
+        st.markdown("#### 봇 관리 작업")
+        _form_suffix = selected_sid[:8]
+        with st.form(f"bot_action_form_{_form_suffix}"):
+            new_flagged = st.checkbox(
+                "🚫 봇으로 차단",
+                value=is_flagged,
+                key=f"bot_flag_check_{_form_suffix}",
+                help="이 사용자를 봇으로 표시하고 응답 생성에서 차단",
+            )
+            new_score = st.slider(
+                "봇 점수",
+                min_value=0.0, max_value=1.0, value=min(score_val, 1.0), step=0.01,
+                key=f"bot_score_slider_{_form_suffix}",
+                help="0.0 = 확실히 사람, 1.0 = 확실히 봇. 0.5 이상은 의심.",
+            )
+            reason = st.text_input(
+                "변경 사유 (감사 로그)",
+                placeholder="예: 반복적인 패턴 질문, 비정상적 응답 속도",
+                key=f"bot_reason_{_form_suffix}",
+            )
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                submitted = st.form_submit_button("💾 저장", use_container_width=True, type="primary")
+            with col_btn2:
+                score_only = st.form_submit_button("📊 점수만 업데이트", use_container_width=True)
+            if submitted:
+                result = bot_toggle_flag(selected_sid, new_flagged, new_score)
+                if result:
+                    st.success(f"✅ '{user.get('display_name') or selected_sid[:12]}' 업데이트 완료")
+                    if reason:
+                        st.caption(f"사유: {reason}")
+                    st.rerun()
+                else:
+                    st.error("저장 실패 — 백엔드 연결을 확인하세요")
+            if score_only:
+                result = bot_toggle_flag(selected_sid, is_flagged, new_score)
+                if result:
+                    st.success(f"✅ 봇 점수 {new_score:.2f}로 업데이트")
+                    st.rerun()
+                else:
+                    st.error("저장 실패 — 백엔드 연결을 확인하세요")
+
+
+def _bot_render_bulk_actions(users: list, filter_label: str) -> None:
+    if not users:
+        return
+    st.divider()
+    st.subheader("📦 일괄 작업")
+    st.caption(f"현재 '{filter_label}' 필터의 {len(users)}명에게 일괄 적용합니다.")
+    bulk_col1, bulk_col2, bulk_col3 = st.columns(3)
+    _btn_suffix = filter_label
+    with bulk_col1:
+        if st.button("🚫 모두 봇 차단", use_container_width=True, key=f"bulk_flag_{_btn_suffix}",
+                      help=f"'{filter_label}' 필터의 {len(users)}명을 봇으로 차단"):
+            count, failed = 0, 0
+            for u in users:
+                if not u.get("flagged_as_bot"):
+                    # [P0-12] API 반환값 검증 — 실패(None) 시 성공으로 카운트하지 않는다
+                    ok = bot_toggle_flag(u["subscriber_id"], True, max(u.get("bot_score", 0) or 0, 0.8))
+                    if ok is not None:
+                        count += 1
+                    else:
+                        failed += 1
+            if failed:
+                st.warning(f"⚠️ {count}명 차단 완료 / {failed}명 실패(백엔드 API 오류) — 새로고침 후 재시도하세요")
+            else:
+                st.success(f"✅ {count}명 봇 차단 처리 완료")
+                st.rerun()
+    with bulk_col2:
+        if st.button("✅ 모두 차단 해제", use_container_width=True, key=f"bulk_unflag_{_btn_suffix}",
+                      help=f"'{filter_label}' 필터의 {len(users)}명 차단 해제"):
+            count, failed = 0, 0
+            for u in users:
+                if u.get("flagged_as_bot"):
+                    ok = bot_toggle_flag(u["subscriber_id"], False, max((u.get("bot_score", 0) or 0) - 0.3, 0.0))
+                    if ok is not None:
+                        count += 1
+                    else:
+                        failed += 1
+            if failed:
+                st.warning(f"⚠️ {count}명 해제 완료 / {failed}명 실패(백엔드 API 오류) — 새로고침 후 재시도하세요")
+            else:
+                st.success(f"✅ {count}명 차단 해제")
+                st.rerun()
+    with bulk_col3:
+        if st.button("📊 점수 0으로 초기화", use_container_width=True, key=f"bulk_reset_{_btn_suffix}",
+                      help=f"'{filter_label}' 필터의 {len(users)}명 bot_score=0"):
+            count, failed = 0, 0
+            for u in users:
+                if (u.get("bot_score", 0) or 0) > 0:
+                    ok = bot_toggle_flag(u["subscriber_id"], u.get("flagged_as_bot", False), 0.0)
+                    if ok is not None:
+                        count += 1
+                    else:
+                        failed += 1
+            if failed:
+                st.warning(f"⚠️ {count}명 초기화 완료 / {failed}명 실패(백엔드 API 오류) — 새로고침 후 재시도하세요")
+            else:
+                st.success(f"✅ {count}명 점수 초기화 완료")
+                st.rerun()
 
 col_r, _ = st.columns([1, 5])
 with col_r:
     if st.button("🔄 새로고침", use_container_width=True):
         st.rerun()
 
-tab_sys, tab_err, tab_sub, tab_tier = st.tabs(["🗂 시스템 현황", "🚨 에러 로그", "💳 구독 현황", "🏗 인프라 티어"])
+tab_sys, tab_err, tab_bot = st.tabs(["🗂 시스템 현황", "🚨 에러 로그", "🤖 봇 관리"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 탭 1: 시스템 현황
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_sys:
+    # VA-3: 서비스 헬스 요약 (한눈에 보기)
+    _svc = get_services_health()
+    if _svc:
+        _overall = _svc.get("overall")
+        if _overall == "healthy":
+            st.success("✅ 전체 서비스 정상")
+        elif _overall == "degraded":
+            st.warning("⚠️ 일부 서비스 저하 — 아래 상태 확인")
+        elif _overall == "unavailable":
+            st.error("❌ 핵심 서비스 사용 불가 — 백엔드 재기동 필요")
+        else:
+            st.info(f"서비스 상태: {_overall}")
+        _svc_items = list(_svc.get("services", {}).items())
+        if _svc_items:
+            _scols = st.columns(min(4, len(_svc_items)))
+            for i, (name, info) in enumerate(_svc_items):
+                with _scols[i % len(_scols)]:
+                    _ok = info.get("ok")
+                    st.markdown(f"{'✅' if _ok else '❌'} **{name}**")
+                    st.caption((info.get("message") or "")[:48])
+        st.divider()
+
     st.subheader("📚 자료 통계")
     docs = list_documents() or []
     if not docs:
@@ -73,25 +264,6 @@ with tab_sys:
             })
             st.dataframe(df, use_container_width=True)
 
-    st.divider()
-    st.subheader("🧪 평가셋 회귀 테스트")
-    st.caption("data/eval/questions.json 의 질문들을 현재 검색 시스템으로 돌려봅니다.")
-    if st.button("▶️ 평가 실행", key="run_eval"):
-        with st.spinner("평가 실행 중..."):
-            res = run_regression()
-        if res and res.get("ok"):
-            st.success(f"통과 {res['passed']}/{res['total']}건")
-            rows = []
-            for it in res["items"]:
-                rows.append({
-                    "질문": it["query"],
-                    "상위3 자료": ", ".join(it["top_titles"]),
-                    "top1 점수": round(it.get("top1_score", 0), 3),
-                    "기대 일치": "✅" if it.get("expected_match") else ("❌" if it.get("expected_match") is False else "-"),
-                })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        elif res:
-            st.error(res.get("reason", "평가 실패"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -101,219 +273,155 @@ with tab_err:
     stats = get_error_stats()
     if stats is None:
         st.error("❌ API 연결 실패")
-        st.stop()
-
-    e1h  = stats.get("errors_1h", 0)
-    e24h = stats.get("errors_24h", 0)
-    c1h  = stats.get("critical_1h", 0)
-    s24h = stats.get("slow_24h", 0)
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("🔴 에러 (1시간)", e1h)
-    m2.metric("🔴 에러 (24시간)", e24h)
-    m3.metric("⚡ CRITICAL (1시간)", c1h)
-    m4.metric("🐢 SLOW (24시간)", s24h)
-
-    if e1h + c1h > 0:
-        st.error(f"⚠️ 최근 1시간 에러 {e1h + c1h}건 — 아래 목록 확인")
-    elif e24h > 0:
-        st.warning(f"최근 24시간 에러 {e24h}건")
     else:
-        st.success("✅ 최근 24시간 에러 없음")
+        e1h  = stats.get("errors_1h", 0)
+        e24h = stats.get("errors_24h", 0)
+        c1h  = stats.get("critical_1h", 0)
+        s24h = stats.get("slow_24h", 0)
 
-    st.divider()
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("🔴 에러 (1시간)", e1h)
+        m2.metric("🔴 에러 (24시간)", e24h)
+        m3.metric("⚡ CRITICAL (1시간)", c1h)
+        m4.metric("🐢 SLOW (24시간)", s24h)
 
-    # 필터
-    cf1, cf2, cf3, cf4 = st.columns(4)
-    with cf1:
-        level_f = st.selectbox("레벨", ["전체", "ERROR", "SLOW", "CRITICAL"], key="err_lv")
-    with cf2:
-        hours_f = st.selectbox("기간", [1, 6, 24, 72, 168], index=2,
-                               format_func=lambda h: f"최근 {h}시간" if h < 24 else f"최근 {h//24}일",
-                               key="err_hr")
-    with cf3:
-        path_f = st.text_input("경로 포함", key="err_path", placeholder="/chat")
-    with cf4:
-        limit_f = st.number_input("최대 건수", 10, 500, 200, key="err_lim")
-
-    lvl_param = None if level_f == "전체" else level_f
-    rows = get_errors(limit=int(limit_f), level=lvl_param,
-                     path=path_f.strip() or None, hours=int(hours_f))
-
-    if not rows:
-        st.info("조건에 맞는 에러 로그가 없습니다.")
-    else:
-        df = pd.DataFrame(rows)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        df["시각"] = df["timestamp"].dt.strftime("%m/%d %H:%M:%S")
-        EMOJI = {"ERROR": "🔴", "SLOW": "🐢", "CRITICAL": "💀"}
-        df["레벨"] = df["level"].map(lambda v: f"{EMOJI.get(v,'⚪')} {v}")
-
-        show = {
-            "시각": "시각", "레벨": "레벨", "method": "메서드",
-            "path": "경로", "status_code": "상태", "duration_ms": "응답(ms)",
-            "error_type": "에러유형", "error_message": "메시지",
-        }
-        df2 = df.rename(columns={k: v for k, v in show.items() if k in df.columns})
-        display = [v for k, v in show.items() if v in df2.columns]
-        st.dataframe(df2[display], use_container_width=True, height=380,
-                     column_config={"응답(ms)": st.column_config.NumberColumn(format="%d ms"),
-                                    "상태": st.column_config.NumberColumn(format="%d")})
-
-        # traceback 상세
-        has_tb = [r for r in rows if r.get("traceback")]
-        if has_tb:
-            st.divider()
-            st.subheader("🔍 Traceback 상세")
-            for r in has_tb:
-                ts = r.get("timestamp", "")
-                try:
-                    r["time_str"] = datetime.fromisoformat(ts).strftime("%m/%d %H:%M:%S")
-                except Exception:
-                    r["time_str"] = ts[:19]
-            opts = {f"[{r['level']}] {r['time_str']} — {r['path']} ({r.get('error_type','?')})": r
-                    for r in has_tb}
-            sel_label = st.selectbox("에러 선택", list(opts.keys()), key="tb_sel")
-            sel = opts[sel_label]
-            col_d1, col_d2 = st.columns(2)
-            with col_d1:
-                st.markdown(f"**레벨**: `{sel['level']}`")
-                st.markdown(f"**경로**: `{sel['method']} {sel['path']}`")
-                st.markdown(f"**상태코드**: `{sel['status_code']}`")
-            with col_d2:
-                st.markdown(f"**에러유형**: `{sel.get('error_type','—')}`")
-                st.markdown(f"**응답시간**: `{sel['duration_ms']} ms`")
-            st.code(sel.get("error_message", ""), language="text")
-            if sel.get("traceback"):
-                st.code(sel["traceback"], language="python")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 탭 3: 구독 현황
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_sub:
-    sub_stats = get_subscription_stats()
-    if not sub_stats:
-        st.warning("구독 통계를 불러올 수 없습니다.")
-    else:
-        total = sub_stats.get("total", 0)
-        by_tier = sub_stats.get("by_tier", {})
-        expiring = sub_stats.get("trial_expiring_24h", 0)
-        expired = sub_stats.get("trial_expired", 0)
-
-        TIER_LABEL = {"guest": "무료체험", "member": "유료회원", "supporter": "후원회원"}
-
-        cols_t = st.columns(len(by_tier) + 2)
-        for i, (t, cnt) in enumerate(by_tier.items()):
-            cols_t[i].metric(TIER_LABEL.get(t, t), cnt)
-        cols_t[-2].metric("⚠️ 체험 만료 임박 (24h)", expiring, delta=None)
-        cols_t[-1].metric("🔒 체험 만료됨", expired, delta_color="inverse")
-
-        st.caption(f"전체 사용자 {total}명")
-
-        if expiring > 0:
-            st.warning(f"⚠️ 24시간 내 무료체험 만료 예정: **{expiring}명** — 👥 사람 페이지에서 개별 연장/업그레이드 가능")
-        if expired > 0:
-            st.info(f"🔒 현재 체험 만료로 차단된 사용자: **{expired}명**")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 탭 4: 인프라 티어
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_tier:
-    st.subheader("🏗 인프라 티어 현황")
-
-    import os as _os
-    CURRENT_TIER = _os.getenv("CURRENT_TIER", "tier_0_5")
-
-    TIER_INFO = {
-        "tier_0":   {"name": "Tier 0",   "subtitle": "로컬 개발",      "users": "1명",    "cost": "$0/월",       "color": "#e8f5e9"},
-        "tier_0_5": {"name": "Tier 0.5", "subtitle": "친구 5명 시범",  "users": "~10명",  "cost": "$0/월",       "color": "#fff9c4"},
-        "tier_1":   {"name": "Tier 1",   "subtitle": "소규모 운영",    "users": "~50명",  "cost": "$0/월",       "color": "#c8e6c9",
-                     "trigger": "사용자 50명 도달 또는 24/7 필요"},
-        "tier_1_5": {"name": "Tier 1.5", "subtitle": "안정화 & 도메인","users": "~200명", "cost": "$10~30/월",   "color": "#a5d6a7",
-                     "trigger": "사용자 100명 또는 도메인 필요"},
-        "tier_2":   {"name": "Tier 2",   "subtitle": "중규모 운영",    "users": "~500명", "cost": "$100~200/월", "color": "#81c784",
-                     "trigger": "사용자 500명 또는 무료 한도 100% 사용"},
-    }
-
-    cur = TIER_INFO.get(CURRENT_TIER, TIER_INFO["tier_0_5"])
-    st.markdown(f"**현재 티어**: {cur['name']} — {cur['subtitle']}  |  비용: {cur['cost']}")
-
-    st.divider()
-
-    # 리소스 사용률 (tier_monitor 서비스 사용)
-    try:
-        from backend.app.services.tier_monitor import get_monitor, TIER_LIMITS
-        _monitor = get_monitor()
-
-        @st.cache_data(ttl=60)
-        def _load_usage():
-            try:
-                u = _monitor.measure_sync()
-                return {
-                    "subscriber_count": u.subscriber_count,
-                    "active_sessions":  u.active_sessions,
-                    "db_size_mb":       u.db_size_mb,
-                    "qdrant_index_mb":  u.qdrant_index_mb,
-                    "daily_llm_cost":   u.daily_llm_cost_usd,
-                }
-            except Exception:
-                return {}
-
-        _limits = TIER_LIMITS.get(CURRENT_TIER, {})
-        _raw    = _load_usage()
-
-        if _raw:
-            r1, r2 = st.columns(2)
-            with r1:
-                max_users = _limits.get("max_users", 10)
-                cnt = _raw.get("subscriber_count", 0)
-                st.metric("👥 사용자", f"{cnt} / {max_users}")
-                st.progress(min(cnt / max(max_users, 1), 1.0))
-
-                max_sess = _limits.get("max_sessions", 5)
-                sess = _raw.get("active_sessions", 0)
-                st.metric("🔄 동시 세션", f"{sess} / {max_sess}")
-                st.progress(min(sess / max(max_sess, 1), 1.0))
-
-            with r2:
-                max_db = _limits.get("max_db_size_mb", 500)
-                db_mb  = _raw.get("db_size_mb", 0)
-                st.metric("💾 DB 크기", f"{db_mb:.1f} / {max_db} MB")
-                st.progress(min(db_mb / max(max_db, 1), 1.0))
-
-                max_q = _limits.get("max_qdrant_size_mb", 1000)
-                q_mb  = _raw.get("qdrant_index_mb", 0)
-                st.metric("🎯 Qdrant 인덱스", f"{q_mb:.1f} / {max_q} MB")
-                st.progress(min(q_mb / max(max_q, 1), 1.0))
-
-            # 업그레이드 권고
-            user_pct = _raw.get("subscriber_count", 0) / max(_limits.get("max_users", 10), 1)
-            if user_pct >= 0.8:
-                st.warning("⏰ 사용자 80% 이상 — 다음 티어 업그레이드 검토 권장")
+        if e1h + c1h > 0:
+            st.error(f"⚠️ 최근 1시간 에러 {e1h + c1h}건 — 아래 목록 확인")
+        elif e24h > 0:
+            st.warning(f"최근 24시간 에러 {e24h}건")
         else:
-            st.info("리소스 사용 데이터를 불러올 수 없습니다.")
-    except ImportError:
-        # tier_monitor.py 제거됨 (2026-06-09 리팩터링)
-        # 실시간 리소스 측정은 backend /health 또는 Langfuse 대시보드 사용
-        st.info("💡 실시간 리소스 모니터링은 Langfuse 대시보드 또는 서버 로그를 확인하세요.")
-    except Exception as _e:
-        st.warning(f"리소스 측정 오류: {_e}")
+            st.success("✅ 최근 24시간 에러 없음")
 
-    st.divider()
-    st.subheader("📊 티어 비교")
+        st.divider()
 
-    _comparison = []
-    for tk in ["tier_0", "tier_0_5", "tier_1", "tier_1_5", "tier_2"]:
-        t = TIER_INFO.get(tk, {})
-        _comparison.append({
-            "티어": t.get("name", ""),
-            "사용자": t.get("users", ""),
-            "비용": t.get("cost", ""),
-            "클라우드": "❌" if tk in ("tier_0", "tier_0_5") else "✅",
-            "도메인": "❌" if tk in ("tier_0", "tier_0_5", "tier_1") else "✅",
-            "업그레이드 기준": t.get("trigger", "—"),
-            "현재": "🌟" if tk == CURRENT_TIER else "",
-        })
-    st.dataframe(pd.DataFrame(_comparison), use_container_width=True, hide_index=True)
+        # 필터
+        cf1, cf2, cf3, cf4 = st.columns(4)
+        with cf1:
+            level_f = st.selectbox("레벨", ["전체", "ERROR", "SLOW", "CRITICAL"], key="err_lv")
+        with cf2:
+            hours_f = st.selectbox("기간", [1, 6, 24, 72, 168], index=2,
+                                   format_func=lambda h: f"최근 {h}시간" if h < 24 else f"최근 {h//24}일",
+                                   key="err_hr")
+        with cf3:
+            path_f = st.text_input("경로 포함", key="err_path", placeholder="/chat")
+        with cf4:
+            limit_f = st.number_input("최대 건수", 10, 500, 200, key="err_lim")
+
+        lvl_param = None if level_f == "전체" else level_f
+        rows = get_errors(limit=int(limit_f), level=lvl_param,
+                         path=path_f.strip() or None, hours=int(hours_f))
+
+        if not rows:
+            st.info("조건에 맞는 에러 로그가 없습니다.")
+        else:
+            df = pd.DataFrame(rows)
+            df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+            df["시각"] = df["timestamp"].dt.strftime("%m/%d %H:%M:%S")
+            EMOJI = {"ERROR": "🔴", "SLOW": "🐢", "CRITICAL": "💀"}
+            df["레벨"] = df["level"].map(lambda v: f"{EMOJI.get(v,'⚪')} {v}")
+
+            show = {
+                "시각": "시각", "레벨": "레벨", "method": "메서드",
+                "path": "경로", "status_code": "상태", "duration_ms": "응답(ms)",
+                "error_type": "에러유형", "error_message": "메시지",
+            }
+            df2 = df.rename(columns={k: v for k, v in show.items() if k in df.columns})
+            display = [v for k, v in show.items() if v in df2.columns]
+            st.dataframe(df2[display], use_container_width=True, height=380,
+                         column_config={"응답(ms)": st.column_config.NumberColumn(format="%d ms"),
+                                        "상태": st.column_config.NumberColumn(format="%d")})
+
+            # traceback 상세
+            has_tb = [r for r in rows if r.get("traceback")]
+            if has_tb:
+                st.divider()
+                st.subheader("🔍 Traceback 상세")
+                for r in has_tb:
+                    ts = r.get("timestamp", "")
+                    try:
+                        r["time_str"] = datetime.fromisoformat(ts).strftime("%m/%d %H:%M:%S")
+                    except Exception:
+                        r["time_str"] = ts[:19]
+                opts = {f"[{r['level']}] {r['time_str']} — {r['path']} ({r.get('error_type','?')})": r
+                        for r in has_tb}
+                sel_label = st.selectbox("에러 선택", list(opts.keys()), key="tb_sel")
+                sel = opts[sel_label]
+                col_d1, col_d2 = st.columns(2)
+                with col_d1:
+                    st.markdown(f"**레벨**: `{sel['level']}`")
+                    st.markdown(f"**경로**: `{sel['method']} {sel['path']}`")
+                    st.markdown(f"**상태코드**: `{sel['status_code']}`")
+                with col_d2:
+                    st.markdown(f"**에러유형**: `{sel.get('error_type','—')}`")
+                    st.markdown(f"**응답시간**: `{sel['duration_ms']} ms`")
+                st.code(sel.get("error_message", ""), language="text")
+                if sel.get("traceback"):
+                    st.code(sel["traceback"], language="python")
+
+
+# ── VA-2: 봇 관리 탭 (12_🤖_봇관리.py 에서 통합) ───────────────────────────────
+with tab_bot:
+    st.markdown(
+        """
+        <style>
+        .bot-badge-flagged { background:#fde2e2; color:#c0392b; padding:3px 8px;
+            border-radius:12px; font-size:12px; font-weight:600; }
+        .bot-badge-suspicious { background:#fff4e0; color:#d68910; padding:3px 8px;
+            border-radius:12px; font-size:12px; font-weight:600; }
+        .bot-badge-clean { background:#e8f8ef; color:#1e8449; padding:3px 8px;
+            border-radius:12px; font-size:12px; font-weight:600; }
+        .bot-score-high { color:#c0392b; font-weight:700; }
+        .bot-score-mid { color:#d68910; font-weight:700; }
+        .bot-score-low { color:#1e8449; font-weight:700; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _bot_stats = bot_stats()
+    if not _bot_stats:
+        st.error("봇 통계를 불러오지 못했습니다.")
+    else:
+        _total = _bot_stats.get("total_subscribers", 0)
+        _flagged = _bot_stats.get("flagged_as_bot", 0)
+        _suspicious = _bot_stats.get("suspicious", 0)
+        _avg = _bot_stats.get("avg_bot_score", 0)
+        _hi, _mi, _lo = st.columns(3)
+        _hi.metric("봇 차단 사용자", f"🚫 {_flagged}명", help="봇으로 플래그된 사용자 수")
+        _mi.metric("의심 사용자", f"⚠️ {_suspicious}명", help="점수 0.5 이상인 사용자 수")
+        _lo.metric("전체 사용자", f"👥 {_total}명")
+        st.metric("평균 봇 점수", f"{_avg:.4f}", help="0.0=사람, 1.0=봇")
+
+        st.divider()
+        st.subheader("🔍 사용자 봇 분석")
+        _filter = st.radio("필터", ["전체", "봇 차단만", "의심만", "정상만"],
+                           horizontal=True, key="bot_filter_radio")
+        if _filter == "봇 차단만":
+            _users = bot_list(filter_type="flagged")
+        elif _filter == "의심만":
+            _users = bot_list(filter_type="suspicious")
+        elif _filter == "정상만":
+            # [P0-11] bot_list() 는 API 실패 시 None 반환 — 반복 전 or [] 가드 필수
+            _users = [u for u in (bot_list() or []) if (u.get("bot_score", 0) or 0) < 0.5 and not u.get("flagged_as_bot")]
+        else:
+            _users = bot_list()
+        _users = _users or []
+
+        _score_th = st.slider("최소 봇 점수 표시", 0.0, 1.0, 0.0, 0.01, key="bot_score_th")
+        _users = [u for u in _users if (u.get("bot_score", 0) or 0) >= _score_th]
+
+        if not _users:
+            st.info(f"조건에 맞는 사용자가 없습니다. (필터: {_filter})")
+        else:
+            st.caption(f"🔎 {len(_users)}명 표시 중")
+            if len(_users) > 1:
+                _options = {_bot_user_label(_users, u["subscriber_id"]): u["subscriber_id"] for u in _users}
+                _selected = st.radio("사용자 선택", list(_options.keys()), key="bot_user_radio")
+                _selected_sid = _options[_selected]
+            else:
+                _selected_sid = _users[0]["subscriber_id"]
+                st.info(f"선택: {_bot_user_label(_users, _selected_sid)}")
+            st.divider()
+            _bot_render_user_detail(_selected_sid, _users)
+            _bot_render_bulk_actions(_users, _filter)
+

@@ -27,7 +27,6 @@ from admin.lib.auth import gate
 
 gate(os.getenv("APP_PASSWORD", ""))
 
-st.set_page_config(page_title="자료실", page_icon="📚", layout="wide")
 st.title("📚 자료실")
 st.caption("올린 자료를 검토하고 검색에 공개합니다.")
 
@@ -198,11 +197,11 @@ def _render_doc_detail(doc_id: str, key_suffix: str = ""):
                     for i, (sl, sp) in enumerate(_pub_stages):
                         with _pcols[i]:
                             if pct >= sp:
-                                st.markdown(f"<div style='text-align:center;color:#22c55e'>✅<br><small>{sl}</small></div>", unsafe_allow_html=True)
+                                st.success(f"✅ {sl}")
                             elif pct >= sp - 15:
-                                st.markdown(f"<div style='text-align:center;color:#f59e0b'>⏳<br><small>{sl}</small></div>", unsafe_allow_html=True)
+                                st.warning(f"⏳ {sl}")
                             else:
-                                st.markdown(f"<div style='text-align:center;color:#94a3b8'>⬜<br><small>{sl}</small></div>", unsafe_allow_html=True)
+                                st.caption(f"⬜ {sl}")
                     time.sleep(2)
                     st.rerun()
             else:
@@ -230,7 +229,8 @@ def _render_doc_detail(doc_id: str, key_suffix: str = ""):
 
         st.divider()
         st.markdown("##### 🗄 자료 관리")
-        if st.button("🗄 이 자료 아카이브 (검색에서 숨김)", key=f"arch_{doc_id}_{v['version_id']}", help="검색에서 제외. 데이터는 보존됨"):
+        _confirm = st.checkbox("정말 아카이브하시겠습니까? (검색에서 숨겨지나 데이터는 보존됩니다)", key=f"archconf_{doc_id}_{v['version_id']}")
+        if st.button("🗄 이 자료 아카이브 (검색에서 숨김)", key=f"arch_{doc_id}_{v['version_id']}", help="검색에서 제외. 데이터는 보존됨", disabled=not _confirm, type="primary"):
             archive_document(doc_id)
             st.success("아카이브됨")
             st.rerun()
@@ -317,7 +317,8 @@ for tab, st_filter in zip([tab_all, tab_draft, tab_pub, tab_arch],
                         r = bulk_action(ids, "publish")
                     if r:
                         st.success(f"성공 {r['ok_count']}/{len(ids)}")
-                        with st.expander("상세"):
+                        with st.container(border=True):
+                            st.caption("상세")
                             st.json(r["results"])
                         st.rerun()
             with colB:

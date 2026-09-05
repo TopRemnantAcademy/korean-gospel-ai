@@ -26,7 +26,6 @@ from admin.lib.auth import gate
 
 gate(os.getenv("APP_PASSWORD", ""))
 
-st.set_page_config(page_title="대화 & 재방문", page_icon="💭", layout="wide")
 st.title("💭 대화 & 재방문")
 
 tab_qa, tab_sim, tab_ret = st.tabs(["📋 대화 기록", "💬 재방문 메시지", "📊 재방문 현황"])
@@ -50,34 +49,69 @@ with tab_qa:
 
     if not items:
         st.info("대화 기록이 없습니다." if not search else f"'{search}' 검색 결과 없음")
-        st.stop()
+    else:
+        st.caption(f"총 **{len(items)}건**")
 
-    st.caption(f"총 **{len(items)}건**")
-
-    for it in items:
-        when = (it.get("created_at") or "")[:19].replace("T", " ")
-        q = it["question"]
-        a = it["answer"]
-        with st.expander(f"📅 {when}  ·  {q[:80]}{'...' if len(q)>80 else ''}"):
-            st.markdown(f"**🙋 질문:** {q}")
-            st.markdown("**✝ 답변:**")
-            st.markdown(a)
-            cited = it.get("cited_versions") or []
-            if cited:
-                st.markdown(f"**📎 참고 자료 {len(cited)}개**")
-                for j, c in enumerate(cited, 1):
-                    st.caption(f"{j}. {c.get('title','?')} v{c.get('version_number','?')} · 관련도 {c.get('score',0):.2f}")
-            bc1, bc2, bc3 = st.columns([1, 1, 4])
-            with bc1:
-                st.caption(f"⏱ {it.get('elapsed_ms', 0)} ms")
-            with bc2:
-                fb = it.get("feedback")
-                st.caption("👍" if fb == 1 else "👎" if fb == -1 else "—")
-            with bc3:
-                if st.button("🗑 삭제", key=f"del_{it['interaction_id']}"):
-                    if delete_memory(it["interaction_id"]):
-                        st.success("삭제됨")
-                        st.rerun()
+        for it in items:
+            when = (it.get("created_at") or "")[:19].replace("T", " ")
+            q = it["question"]
+            a = it["answer"]
+            with st.expander(f"📅 {when}  ·  {q[:80]}{'...' if len(q)>80 else ''}"):
+                st.markdown(f"**🙋 질문:** {q}")
+                st.markdown("**✝ 답변:**")
+                st.markdown(a)
+                cited = it.get("cited_versions") or []
+                if cited:
+                    st.markdown(f"**📎 참고 자료 {len(cited)}개**")
+                    # X-Plus B/C: 출처(source_type) 필터 + 정렬 UI
+                    _src_types = sorted({c.get("source_type") for c in cited if c.get("source_type")})
+                    _sel_src = (
+                        st.multiselect(
+                            "🏷 출처 필터", _src_types, default=_src_types,
+                            key=f"srcf_{it['interaction_id']}",
+                        )
+                        if _src_types else None
+                    )
+                    _sort_key = st.radio(
+                        "정렬 기준", ["관련도", "신뢰도"], horizontal=True,
+                        key=f"sort_{it['interaction_id']}", index=0,
+                    )
+                    _desc = st.checkbox("높은 순", value=True, key=f"rev_{it['interaction_id']}")
+                    _shown = [c for c in cited if _sel_src is None or c.get("source_type") in _sel_src]
+                    _shown.sort(
+                        key=lambda c: (c.get("reliability_score") if _sort_key == "신뢰도" else c.get("score")) or 0,
+                        reverse=_desc,
+                    )
+                    for j, c in enumerate(_shown, 1):
+                        with st.container(border=True):
+                            st.caption(
+                                f"{j}. {c.get('title','?')} v{c.get('version_number','?')} "
+                                f"· 관련도 {c.get('score',0):.2f}"
+                                + (f" · 신뢰도 {c.get('reliability_score','-')}" if c.get('reliability_score') is not None else "")
+                            )
+                            # X-Plus A / V-3: 청크 본문 스니펫 드릴다운
+                            # (주의: expander 는 expander 안에 중첩 불가 — container 로 대체)
+                            if c.get("snippet"):
+                                with st.container(border=True):
+                                    st.caption("📄 인용 청크 본문")
+                                    st.markdown(c["snippet"])
+                            # 검색 설명 (왜 이 문서가 선택됐는지)
+                            if c.get("explanation"):
+                                st.caption(f"💡 {c['explanation']}")
+                            if c.get("matched_keywords"):
+                                st.caption(f"🔑 {', '.join(c['matched_keywords'])}")
+                bc1, bc2, bc3 = st.columns([1, 1, 4])
+                with bc1:
+                    st.caption(f"⏱ {it.get('elapsed_ms', 0)} ms")
+                with bc2:
+                    fb = it.get("feedback")
+                    st.caption("👍" if fb == 1 else "👎" if fb == -1 else "—")
+                with bc3:
+                    _confirm = st.checkbox("정말 삭제하시겠습니까?", key=f"delconf_{it['interaction_id']}")
+                    if st.button("🗑 삭제", key=f"del_{it['interaction_id']}", disabled=not _confirm, type="primary"):
+                        if delete_memory(it["interaction_id"]):
+                            st.success("삭제됨")
+                            st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -104,11 +138,7 @@ with tab_sim:
             if st.button("💬 메시지 생성", use_container_width=True):
                 res = get_greeting(uid, mode=mode_sel)
                 if res:
-                    st.markdown(
-                        f"<div style='background:#1e3a5f;padding:16px;border-radius:8px;"
-                        f"border-left:4px solid #4a9eff'>{res.get('greeting','')}</div>",
-                        unsafe_allow_html=True,
-                    )
+                    st.info(res.get('greeting', ''))
                 else:
                     st.error("API 연결 실패")
 
@@ -140,11 +170,7 @@ with tab_sim:
                 total_questions=int(total_q_sim),
             )
             if res:
-                st.markdown(
-                    f"<div style='background:#1a3a2a;padding:16px;border-radius:8px;"
-                    f"border-left:4px solid #4CAF50'>{res['message']}</div>",
-                    unsafe_allow_html=True,
-                )
+                st.success(res['message'])
             else:
                 st.error("API 연결 실패")
 
@@ -156,49 +182,48 @@ with tab_ret:
     subs = list_subscribers()
     if not subs:
         st.warning("구독자 없음 또는 API 연결 실패")
-        st.stop()
+        # [FIX #17] st.stop() 제거 — 전체 스크립트 중단 없이 이 탭만 조기 종료
+    else:
+        now = datetime.utcnow()
 
-    now = datetime.utcnow()
+        def _parse_dt(s):
+            if not s:
+                return None
+            try:
+                return datetime.fromisoformat(str(s).split(".")[0])
+            except Exception:
+                return None
 
-    def _parse_dt(s):
-        if not s:
-            return None
-        try:
-            return datetime.fromisoformat(str(s).split(".")[0])
-        except Exception:
-            return None
+        rows = []
+        for sub in subs:
+            last_dt = _parse_dt(sub.get("last_active_at"))
+            tq = sub.get("total_questions", 0) or 0
+            days_away = max(0, (now - last_dt).days) if last_dt else None
+            rows.append({
+                "ID": sub.get("subscriber_id", "?")[:16],
+                "이름": sub.get("display_name") or "익명",
+                "총 대화": tq,
+                "재방문": tq > 1,
+                "경과일": days_away,
+                "마지막 방문": str(last_dt.date()) if last_dt else "—",
+                "감정": sub.get("emotional_state") or "—",
+            })
 
-    rows = []
-    for sub in subs:
-        last_dt = _parse_dt(sub.get("last_active_at"))
-        tq = sub.get("total_questions", 0) or 0
-        days_away = max(0, (now - last_dt).days) if last_dt else None
-        rows.append({
-            "ID": sub.get("subscriber_id", "?")[:16],
-            "이름": sub.get("display_name") or "익명",
-            "총 대화": tq,
-            "재방문": tq > 1,
-            "경과일": days_away,
-            "마지막 방문": str(last_dt.date()) if last_dt else "—",
-            "감정": sub.get("emotional_state") or "—",
-            "구독": sub.get("subscription_tier") or "guest",
-        })
+        df = pd.DataFrame(rows)
+        total = len(df)
+        returning = int(df["재방문"].sum())
+        lapsed = int(df[df["경과일"].notna() & (df["경과일"] > 30)].shape[0])
 
-    df = pd.DataFrame(rows)
-    total = len(df)
-    returning = int(df["재방문"].sum())
-    lapsed = int(df[df["경과일"].notna() & (df["경과일"] > 30)].shape[0])
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("전체", total)
+        m2.metric("재방문", returning)
+        m3.metric("7일내 재방문", int(df[df["재방문"] & (df["경과일"].fillna(999) <= 7)].shape[0]))
+        m4.metric("30일+ 이탈", lapsed, delta_color="inverse")
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("전체", total)
-    m2.metric("재방문", returning)
-    m3.metric("7일내 재방문", int(df[df["재방문"] & (df["경과일"].fillna(999) <= 7)].shape[0]))
-    m4.metric("30일+ 이탈", lapsed, delta_color="inverse")
+        show_f = st.radio("표시", ["전체", "재방문만", "30일+ 이탈"], horizontal=True, key="ret_f")
+        if show_f == "재방문만":
+            df = df[df["재방문"]]
+        elif show_f == "30일+ 이탈":
+            df = df[df["경과일"].notna() & (df["경과일"] > 30)]
 
-    show_f = st.radio("표시", ["전체", "재방문만", "30일+ 이탈"], horizontal=True, key="ret_f")
-    if show_f == "재방문만":
-        df = df[df["재방문"]]
-    elif show_f == "30일+ 이탈":
-        df = df[df["경과일"].notna() & (df["경과일"] > 30)]
-
-    st.dataframe(df.drop(columns=["재방문"]).sort_values("경과일"), use_container_width=True, height=400)
+        st.dataframe(df.drop(columns=["재방문"]).sort_values("경과일"), use_container_width=True, height=400)

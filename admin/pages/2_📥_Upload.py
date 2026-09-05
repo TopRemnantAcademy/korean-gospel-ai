@@ -1,7 +1,7 @@
-"""Upload - 자료 등록 (직접 입력 / inbox 폴더 / 파일 업로드)."""
+"""Upload - 자료 등록 (직접 입력 / 파일 업로드)."""
 from __future__ import annotations
 
-import sys, json, time
+import sys, time
 from pathlib import Path
 _ROOT = Path(__file__).resolve().parent
 while _ROOT.name in ("pages", "lib"):
@@ -16,15 +16,14 @@ from dotenv import load_dotenv
 load_dotenv(_ROOT / ".env")
 
 from admin.lib.api_client import (
-    ingest_text_async, list_inbox, ingest_inbox_async,
-    upload_document_async, get_job, check_backend_health, API_BASE,
+    ingest_text_async, upload_document_async, ingest_clean_chunks,
+    get_job, check_backend_health, API_BASE,
     publish_version_async, patch_meta, patch_doc_meta, patch_body, get_document,
 )
 from admin.lib.auth import gate
 
 gate(os.getenv("APP_PASSWORD", ""))
 
-st.set_page_config(page_title="자료 등록", page_icon="📥", layout="wide")
 st.title("📥 자료 등록")
 
 DOC_TYPE_LABELS = {
@@ -43,7 +42,7 @@ DOC_TYPE_REV = {v: k for k, v in DOC_TYPE_LABELS.items()}
 # ═══════════════════════════════════════════════════════════════
 # 헬퍼: 폴링 진행 상황 표시 (세 가지 방식 공통)
 # ═══════════════════════════════════════════════════════════════
-def _show_progress_and_poll(job_id: str, is_inbox: bool = False):
+def _show_progress_and_poll(job_id: str):
     """세션에 job_id 있으면 진행바 표시 → 완료 시 결과 저장 후 rerun."""
     if "upload_poll_start" not in st.session_state:
         st.session_state.upload_poll_start = time.time()
@@ -97,18 +96,15 @@ def _show_progress_and_poll(job_id: str, is_inbox: bool = False):
     # ── 완료 ──────────────────────────────────────────────────────
     if job.get("status") == "done":
         result = job.get("result_json") or {}
-        if is_inbox:
-            st.session_state.inbox_result = result
-        else:
-            # ▶ 자동 공개: doc_id + version_id 있으면 즉시 publish 요청
-            _doc_id = result.get("doc_id") or result.get("id")
-            _ver_id = result.get("version_id")
-            if _doc_id and _ver_id and result.get("state") != "published":
-                _pub = publish_version_async(_doc_id, _ver_id)
-                if _pub and _pub.get("job_id"):
-                    result["_auto_publish_job"] = _pub["job_id"]
-                result["state"] = "published"  # 낙관적 UI 업데이트
-            st.session_state.last_upload = result
+        # ▶ 자동 공개: doc_id + version_id 있으면 즉시 publish 요청
+        _doc_id = result.get("doc_id") or result.get("id")
+        _ver_id = result.get("version_id")
+        if _doc_id and _ver_id and result.get("state") != "published":
+            _pub = publish_version_async(_doc_id, _ver_id)
+            if _pub and _pub.get("job_id"):
+                result["_auto_publish_job"] = _pub["job_id"]
+            result["state"] = "published"  # 낙관적 UI 업데이트
+        st.session_state.last_upload = result
         st.session_state.upload_job_id = None
         st.session_state.pop("upload_poll_start", None)
         st.rerun()
@@ -141,8 +137,7 @@ def _show_progress_and_poll(job_id: str, is_inbox: bool = False):
 # ═══════════════════════════════════════════════════════════════
 _job_id = st.session_state.get("upload_job_id")
 if _job_id:
-    is_inbox = st.session_state.get("upload_is_inbox", False)
-    _show_progress_and_poll(_job_id, is_inbox=is_inbox)
+    _show_progress_and_poll(_job_id)
     st.stop()
 
 
@@ -157,7 +152,7 @@ if st.session_state.get("last_upload"):
 
     # ── 상태 배너 ─────────────────────────────────────────────
     st.success(f"✅ 등록 + 즉시 공개 완료: **{r.get('title')}**  (v{r.get('version_number')})")
-    st.caption(f"📊 추출 품질 {_q}/100  |  🔓 검색 공개 상태  |  🔖 용어 자동 추출 완료")
+    st.caption(f"📊 추출 품질 {_q}/100  |  🔓 검색 공개 상태")
 
     # ── 중복 경고 ─────────────────────────────────────────────
     for h in (r.get("dup_hits") or []):
@@ -262,88 +257,147 @@ if st.session_state.get("last_upload"):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 완료 결과 표시 (inbox 일괄)
+# 기본 경로 안내 + 탭: [①] 정제 데이터 직행(Fast-Track, 기본) / [②] 보조 도구
 # ═══════════════════════════════════════════════════════════════
-if st.session_state.get("inbox_result"):
-    r = st.session_state.inbox_result
-    sc = r.get("success_count", 0)
-    total = r.get("total", 0)
-    st.success(f"✅ inbox 처리 완료 — {sc}/{total}개 성공")
-    for d in (r.get("done") or []):
-        st.markdown(f"- ✅ **{d.get('title') or d.get('file')}**")
-    for e in (r.get("errors") or []):
-        st.markdown(f"- ❌ `{e.get('file')}` — {e.get('error')}")
-    st.info("📚 **Library** 에서 검토 후 공개하세요.")
-    if st.button("✖ 닫기", key="close_inbox_result"):
-        st.session_state.inbox_result = None
-        st.rerun()
-    st.divider()
+st.markdown("### 🚀 기본 경로: 정제 청크 파일 바로 업로드")
+st.info(
+    "외부에서 한국어(원문)·중국어(번역)를 1:1로 **이미 정제·번역해 둔 청크 파일**을 올리면, "
+    "LLM 번역·청킹 과정을 건너뛰고 **몇 초 만에** 검색 가능해집니다. "
+    "평소 자료 등록은 아래 **① 정제 데이터 업로드** 탭만 사용하세요."
+)
+
+tab_fast, tab_aux = st.tabs([
+    "① 정제 데이터 업로드 (Fast-Track · 기본)",
+    "② 보조 도구 (원시 파일 · 직접 입력)",
+])
 
 
-# ═══════════════════════════════════════════════════════════════
-# 탭 2개 (inbox 제거 — 직접입력 / 파일업로드)
-# ═══════════════════════════════════════════════════════════════
-tab_text, tab_file = st.tabs(["📝 직접 입력", "⬆ 파일 업로드"])
+def _preview_clean_chunks(raw: bytes, filename: str):
+    """업로드 파일을 client-side 파싱해 미리보기 행 + 검수 요약 반환."""
+    import json as _json
+    try:
+        text = raw.decode("utf-8", errors="replace").strip()
+        if not text:
+            return None, 0, 0, "빈 파일입니다"
+        try:
+            obj = _json.loads(text)
+            docs = obj.get("documents", [obj]) if isinstance(obj, dict) else obj
+        except _json.JSONDecodeError:
+            docs = []
+            for line in text.splitlines():
+                line = line.strip()
+                if line:
+                    docs.append(_json.loads(line))
+        rows, missing_zh = [], 0
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            chunks = d.get("chunks")
+            if chunks is None and ("korean_text" in d or "chinese_text" in d):
+                chunks = [d]
+            if not chunks:
+                continue
+            for i, ch in enumerate(chunks):
+                ci = ch.get("chunk_index", i)
+                ko = (ch.get("korean_text") or "").strip()
+                zh = (ch.get("chinese_text") or "").strip()
+                if not zh:
+                    missing_zh += 1
+                rows.append({
+                    "#": ci,
+                    "한국어 (원문)": (ko[:140] + "…") if len(ko) > 140 else ko,
+                    "중국어 (번역)": (zh[:140] + "…") if len(zh) > 140 else zh,
+                })
+        return rows, len(docs), missing_zh, None
+    except Exception as e:
+        return None, 0, 0, f"파싱 실패: {e}"
+
 
 # ───────────────────────────────────────────────────────────────
-# TAB 1: 직접 입력
+# TAB ①: 정제 데이터 직행 (Fast-Track) — 기본 경로
 # ───────────────────────────────────────────────────────────────
-with tab_text:
-    st.caption("텍스트나 마크다운을 바로 붙여넣어 등록해요. 등록 즉시 검색에 공개됩니다.")
+with tab_fast:
+    st.markdown("#### 📋 업로드 순서")
+    st.markdown(
+        "1. **파일 준비** — `.json` / `.jsonl` 로, 청크마다 `korean_text`(원문)·`chinese_text`(번역)를 1:1 매핑\n"
+        "2. **형식 확인** — 아래 ▶ 샘플 형식 보기 로 예시 확인\n"
+        "3. **업로드** — 파일 선택 → 미리보기 검수 → 🚀 바로 적재"
+    )
+    st.caption("지원 형식: `.json` / `.jsonl` — 청크 단위로 한국어·중국어가 1:1 매핑된 파일")
 
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        txt_title = st.text_input("제목 *", key="txt_title", placeholder="예: 롬5장 — 화평을 누리자")
-        txt_type_label = st.selectbox("자료 종류 *", DOC_TYPE_OPTIONS, key="txt_type")
-        txt_type = DOC_TYPE_REV[txt_type_label]
-    with col2:
-        with st.expander("➕ 추가 정보 (선택)"):
-            txt_series  = st.text_input("시리즈명", key="txt_series")
-            txt_speaker = st.text_input("저자 / 화자", key="txt_speaker")
-            txt_tags    = st.text_input("주제 태그 (쉼표 구분)", key="txt_tags")
-            txt_refs    = st.text_input("본문 구절", key="txt_refs")
-            txt_summary = st.text_area("요약", height=68, key="txt_summary")
+    with st.expander("▶ 샘플 형식 보기", expanded=False):
+        st.code(
+            '{\n'
+            '  "doc_id": "20260201_전도자의낮",\n'
+            '  "title": "전도자의 낮",\n'
+            '  "chunks": [\n'
+            '    {\n'
+            '      "chunk_index": 0,\n'
+            '      "korean_text": "그러므로 우리가 믿음으로...",\n'
+            '      "chinese_text": "我们既因信称义",\n'
+            '      "topic_tags": ["칭의", "믿음"],\n'
+            '      "scripture_refs": ["롬 5:1"],\n'
+            '      "summary": "믿음으로 얻은 의로움"\n'
+            '    }\n'
+            '  ]\n'
+            '}',
+            language="json",
+        )
 
-    txt_content = st.text_area(
-        "본문 내용 *",
-        height=300,
-        key="txt_content",
-        placeholder=(
-            "여기에 설교 / 자료 내용을 붙여넣거나 직접 입력하세요.\n\n"
-            "마크다운 형식 지원:\n"
-            "# 제목\n## 소제목\n**굵게** *기울임*\n\n"
-            "일반 텍스트도 됩니다."
-        ),
+    fast_file = st.file_uploader(
+        "정제 청크 파일 선택 (.json / .jsonl)",
+        type=["json", "jsonl"],
+        accept_multiple_files=False,
+        key="fast_file",
     )
 
-    _can_txt = bool(txt_title and txt_content and txt_content.strip())
-    if not _can_txt:
-        st.caption("⬆ **제목**과 **본문 내용**을 입력하면 등록할 수 있어요.")
-
-    if st.button("📤 등록 + 즉시 공개", type="primary", disabled=not _can_txt,
-                 key="txt_submit", use_container_width=True):
-        resp = ingest_text_async(
-            title=txt_title, content=txt_content, doc_type=txt_type,
-            series=txt_series or "", speaker=txt_speaker or "",
-            topic_tags=txt_tags or "", scripture_refs=txt_refs or "",
-            summary=txt_summary or "",
-        )
-        if resp and resp.get("job_id"):
-            st.session_state.upload_job_id = resp["job_id"]
-            st.session_state.upload_is_inbox = False
-            st.rerun()
+    if fast_file:
+        raw = fast_file.getvalue()
+        st.success(f"✅ {fast_file.name}  ·  {len(raw):,} bytes")
+        rows, n_docs, missing_zh, err = _preview_clean_chunks(raw, fast_file.name)
+        if err:
+            st.error(f"❌ {err}")
         else:
-            st.error("❌ 서버 연결에 실패했어요. API 서버가 실행 중인지 확인하세요.")
+            if missing_zh:
+                st.warning(f"⚠ 중국어 누락 {missing_zh}개 — 해당 청크는 원문(한국어)으로 폴백 적재됩니다.")
+            else:
+                st.success("✅ 중국어 전체 매핑 확인")
+            st.markdown(f"🔎 **검수 미리보기**: 문서 **{n_docs}**개 · 청크 **{len(rows)}**개")
+            if rows:
+                st.dataframe(rows[:20], use_container_width=True, hide_index=True)
+                if len(rows) > 20:
+                    st.caption(f"… 외 {len(rows)-20}개 청크 (총 {len(rows)}개)")
+            if st.button("🚀 바로 적재 (번역 생략)", type="primary",
+                         use_container_width=True, key="fast_submit"):
+                with st.spinner("임베딩 계산 + 벡터 DB 적재 중..."):
+                    resp = ingest_clean_chunks(fast_file.name, raw)
+                if resp and resp.get("status") == "ok":
+                    st.success(
+                        f"✅ 적재 완료 — 컬렉션 `{resp.get('collection')}` 에 "
+                        f"청크 **{resp.get('total_chunks')}**개 적재됨"
+                    )
+                    st.balloons()
+                else:
+                    _m = (resp or {}).get("message") or "서버 응답 없음"
+                    st.error(f"❌ 적재 실패: {_m}")
+
 
 # ───────────────────────────────────────────────────────────────
-# TAB 2: 파일 업로드
+# TAB ②: 보조 도구 (원시 파일 · 직접 입력) — 비중 낮춤
 # ───────────────────────────────────────────────────────────────
-with tab_file:
-    st.caption("PDF · DOCX · TXT · MD 파일을 직접 업로드해요. (데드락 수정 완료)")
+with tab_aux:
+    st.warning(
+        "🛟 **보조 경로** — Fast-Track 정제 청크를 쓸 수 없는 비상/특수 상황에서만 사용하세요. "
+        "원시 파일은 시스템이 자동으로 청킹·LLM 번역을 돌려 **시간이 오래 걸립니다**.",
+        icon="🛟",
+    )
 
+    # ── 2-a 원시 파일 업로드 (보조) ──────────────────────────────
+    st.markdown("##### 📄 원시 파일 업로드 (보조)")
+    st.caption("PDF · DOCX · TXT · MD 파일 → 시스템 자동 청킹·번역")
     col1, col2 = st.columns([1, 1])
     with col1:
-        st.markdown("#### 파일")
+        st.markdown("**파일**")
         file = st.file_uploader(
             "PDF · DOCX · TXT · MD",
             accept_multiple_files=False,
@@ -353,7 +407,7 @@ with tab_file:
             st.success(f"✅ {file.name}  ·  {file.size:,} bytes")
 
     with col2:
-        st.markdown("#### 기본 정보")
+        st.markdown("**기본 정보**")
         title = st.text_input("제목 *", key="up_title", placeholder="예: 롬5장 — 화평을 누리자")
         doc_type_label = st.selectbox("자료 종류 *", DOC_TYPE_OPTIONS, key="up_type_label")
         doc_type = DOC_TYPE_REV[doc_type_label]
@@ -365,12 +419,11 @@ with tab_file:
             refs    = st.text_input("본문 구절", key="up_refs")
             summary = st.text_area("요약", height=68, key="up_summary")
 
-    st.markdown("---")
     can_submit = bool(file and title)
     if not can_submit:
         st.caption("⬆ 파일과 제목을 모두 입력하면 올릴 수 있어요.")
 
-    if st.button("📤 업로드", type="primary", disabled=not can_submit,
+    if st.button("📤 원시 파일 업로드", disabled=not can_submit,
                  key="up_submit", use_container_width=True):
         resp = upload_document_async(
             file.name, file.getvalue(),
@@ -383,7 +436,6 @@ with tab_file:
         )
         if resp and resp.get("job_id"):
             st.session_state.upload_job_id = resp["job_id"]
-            st.session_state.upload_is_inbox = False
             st.session_state.pop("upload_poll_start", None)
             st.rerun()
         else:
@@ -400,3 +452,52 @@ with tab_file:
                             "uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload",
                             language="bash",
                         )
+
+    st.divider()
+
+    # ── 2-b 직접 입력 (보조) ─────────────────────────────────────
+    st.markdown("##### 📝 직접 입력 (보조)")
+    st.caption("텍스트/마크다운을 붙여넣어 등록 → 즉시 검색 공개")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        txt_title = st.text_input("제목 *", key="txt_title", placeholder="예: 롬5장 — 화평을 누리자")
+        txt_type_label = st.selectbox("자료 종류 *", DOC_TYPE_OPTIONS, key="txt_type")
+        txt_type = DOC_TYPE_REV[txt_type_label]
+    with col2:
+        with st.expander("➕ 추가 정보 (선택)"):
+            txt_series  = st.text_input("시리즈명", key="txt_series")
+            txt_speaker = st.text_input("저자 / 화자", key="txt_speaker")
+            txt_tags    = st.text_input("주제 태그 (쉼표 구분)", key="txt_tags")
+            txt_refs    = st.text_input("본문 구절", key="txt_refs")
+            txt_summary = st.text_area("요약", height=68, key="txt_summary")
+
+    txt_content = st.text_area(
+        "본문 내용 *",
+        height=240,
+        key="txt_content",
+        placeholder=(
+            "여기에 설교 / 자료 내용을 붙여넣거나 직접 입력하세요.\n\n"
+            "마크다운 형식 지원:\n"
+            "# 제목\n## 소제목\n**굵게** *기울임*\n\n"
+            "일반 텍스트도 됩니다."
+        ),
+    )
+
+    _can_txt = bool(txt_title and txt_content and txt_content.strip())
+    if not _can_txt:
+        st.caption("⬆ **제목**과 **본문 내용**을 입력하면 등록할 수 있어요.")
+
+    if st.button("📤 직접 입력 등록", disabled=not _can_txt,
+                 key="txt_submit", use_container_width=True):
+        resp = ingest_text_async(
+            title=txt_title, content=txt_content, doc_type=txt_type,
+            series=txt_series or "", speaker=txt_speaker or "",
+            topic_tags=txt_tags or "", scripture_refs=txt_refs or "",
+            summary=txt_summary or "",
+        )
+        if resp and resp.get("job_id"):
+            st.session_state.upload_job_id = resp["job_id"]
+            st.rerun()
+        else:
+            st.error("❌ 서버 연결에 실패했어요. API 서버가 실행 중인지 확인하세요.")

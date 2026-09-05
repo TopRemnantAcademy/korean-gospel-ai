@@ -1,6 +1,7 @@
 """E-G3: 공통 UI 컴포넌트 — 모든 admin 페이지에서 재사용."""
 from __future__ import annotations
 
+import html
 from typing import Callable, Optional
 import streamlit as st
 
@@ -30,19 +31,28 @@ def suggestion_card(
 
 
 def stepper(stages: list[str], current: int) -> None:
-    """진행 단계 표시 — current는 0-based."""
+    """진행 단계 표시 — current는 0-based. CSS 변수로 테마 연동."""
     cols = st.columns(len(stages))
     for i, (col, stage) in enumerate(zip(cols, stages)):
+        safe_stage = html.escape(str(stage))
         with col:
             if i < current:
-                st.markdown(f"<div style='text-align:center;color:#2d5016;font-weight:bold'>✅ {stage}</div>",
-                            unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='text-align:center;color:var(--st-success,#2E7D32);font-weight:600'>"
+                    f"<span aria-hidden='true'>✓</span> {safe_stage}</div>",
+                    unsafe_allow_html=True,
+                )
             elif i == current:
-                st.markdown(f"<div style='text-align:center;color:#1a7acc;font-weight:bold;font-size:1.05em'>▶ {stage}</div>",
-                            unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='text-align:center;color:var(--st-primary,#4CAF50);font-weight:700;font-size:1.05em'>"
+                    f"<span aria-hidden='true'>▶</span> {safe_stage}</div>",
+                    unsafe_allow_html=True,
+                )
             else:
-                st.markdown(f"<div style='text-align:center;color:#999'>○ {stage}</div>",
-                            unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='text-align:center;opacity:0.45;font-weight:400'>{safe_stage}</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def diff_viewer(before: str, after: str, label_before: str = "이전", label_after: str = "이후") -> None:
@@ -70,11 +80,13 @@ def token_meter(daily: int, monthly: int, bonus: int, tier: str = "guest") -> No
 
 
 def empty_state(icon: str, title: str, cta_label: str = "", cta_cb: Optional[Callable] = None) -> None:
-    """빈 상태 표시 (데이터 없을 때)."""
+    """빈 상태 표시 (데이터 없을 때). CSS 변수로 테마 연동."""
+    safe_icon = html.escape(str(icon))
+    safe_title = html.escape(str(title))
     st.markdown(
-        f"<div style='text-align:center;padding:3rem;color:#888'>"
-        f"<div style='font-size:3rem'>{icon}</div>"
-        f"<div style='font-size:1.1rem;margin-top:1rem'>{title}</div>"
+        f"<div style='text-align:center;padding:3rem 1.5rem;opacity:0.6'>"
+        f"<div aria-hidden='true' style='font-size:3rem;margin-bottom:0.75rem'>{safe_icon}</div>"
+        f"<div style='font-size:1.05rem;font-weight:500'>{safe_title}</div>"
         f"</div>",
         unsafe_allow_html=True,
     )

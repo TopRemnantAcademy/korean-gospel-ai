@@ -21,7 +21,6 @@ from admin.lib.auth import gate
 
 gate(os.getenv("APP_PASSWORD", ""))
 
-st.set_page_config(page_title="프롬프트", page_icon="📝", layout="wide")
 st.title("📝 프롬프트 (AI 어조 편집)")
 st.caption("이 텍스트가 AI에게 매번 보내는 '지침서'입니다. 톤·말투·금지사항을 여기서 정하세요.")
 

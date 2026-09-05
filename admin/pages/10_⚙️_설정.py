@@ -1,4 +1,4 @@
-"""⚙️ 설정 — API 키·모델·기능 플래그 전체 관리."""
+"""⚙️ 설정 — API 키·모델·운영 설정 관리."""
 from __future__ import annotations
 
 import sys
@@ -20,7 +20,6 @@ from admin.lib.auth import gate
 
 gate(os.getenv("APP_PASSWORD", ""))
 
-st.set_page_config(page_title="설정", page_icon="⚙️", layout="wide")
 st.title("⚙️ 설정")
 st.caption("모든 설정 변경은 .env 파일에 저장됩니다. 저장 후 **백엔드를 재시작**해야 적용돼요.")
 
@@ -47,6 +46,7 @@ def _read_env() -> tuple[dict[str, str], str]:
 
 def _write_env(updates: dict[str, str]):
     """Write updates back to .env, preserving comments and ordering."""
+    updates = {k: str(v).replace("\n", "").replace("\r", "") for k, v in updates.items()}
     _, raw = _read_env()
     lines = raw.splitlines() if raw else []
     written: set[str] = set()
@@ -58,7 +58,6 @@ def _write_env(updates: dict[str, str]):
             key = stripped.partition("=")[0].strip().upper()
             if key in updates:
                 val = updates[key]
-                # Quote values that contain spaces or are empty
                 if " " in val or (val == "" and key in updates):
                     new_lines.append(f'{key}="{val}"')
                 else:
@@ -69,7 +68,6 @@ def _write_env(updates: dict[str, str]):
         else:
             new_lines.append(line)
 
-    # Append any new keys not already in the file
     for key, val in updates.items():
         if key not in written:
             if " " in val:
@@ -105,11 +103,10 @@ def _gf(key: str, default: float = 0.0) -> float:
         return default
 
 
-# 현재 백엔드에 로드된 값 확인
 from admin.lib.api_client import get_health
 import httpx
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
-ADMIN_TOKEN = os.getenv("ADMIN_API_KEY", "local-admin-key")
+ADMIN_TOKEN = os.getenv("ADMIN_API_KEY", "change-me")
 
 def _get_live_settings():
     try:
@@ -124,12 +121,12 @@ def _get_live_settings():
 # ─────────────────────────────────────────────────────────────────────────────
 # 탭
 # ─────────────────────────────────────────────────────────────────────────────
-tab_llm, tab_emb, tab_ret, tab_auth, tab_feat, tab_quota, tab_lf, tab_raw = st.tabs([
+tab_llm, tab_emb, tab_ret, tab_auth, tab_feat, tab_lf, tab_raw = st.tabs([
     "🤖 LLM", "🧮 임베딩·검색", "🔍 검색 파라미터",
-    "🔐 인증·보안", "🚦 기능 플래그", "🎫 쿼터", "📡 Langfuse", "📄 Raw .env",
+    "🔐 인증·보안", "🛡 안전·검색", "📡 Langfuse", "📄 Raw .env",
 ])
 
-all_updates: dict[str, str] = {}  # accumulated across all tabs
+all_updates: dict[str, str] = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,11 +331,11 @@ with tab_auth:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 탭 5: 기능 플래그
+# 탭 5: 안전·검색 설정
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_feat:
-    st.subheader("기능 플래그 (Feature Flags)")
-    st.caption("각 기능을 ON/OFF할 수 있어요. 개발·시범 운영 시 일부를 끄면 도움이 돼요.")
+    st.subheader("안전·검색 설정")
+    st.caption("정책, 구원 여정, 검색 보강처럼 실제 런타임에 사용되는 설정만 관리합니다.")
     with st.form("form_feat"):
         f1, f2 = st.columns(2)
         with f1:
@@ -348,16 +345,14 @@ with tab_feat:
             legalism        = st.checkbox("LEGALISM_CHECK_ENABLED (율법주의 차단)",       value=_gb("LEGALISM_CHECK_ENABLED", True))
         with f2:
             ret_boost       = st.checkbox("RETRIEVER_BOOST_ENABLED (구원·다락방 부스트)", value=_gb("RETRIEVER_BOOST_ENABLED", True))
-            gospel_fallback = st.checkbox("GOSPEL_CORE_FALLBACK_ENABLED (검색 0건 복음 핵심 노출)", value=_gb("GOSPEL_CORE_FALLBACK_ENABLED", True))
-            token_quota     = st.checkbox("TOKEN_QUOTA_ENABLED (토큰 쿼터 적용)",         value=_gb("TOKEN_QUOTA_ENABLED", True))
-            rate_limit      = st.checkbox("RATE_LIMIT_ENABLED (Rate Limit 적용)",         value=_gb("RATE_LIMIT_ENABLED", True))
+            gospel_fallback = st.checkbox("GOSPEL_CORE_FALLBACK_ENABLED (검색 0건 말씀 핵심 노출)", value=_gb("GOSPEL_CORE_FALLBACK_ENABLED", True))
 
         log_level = st.selectbox("LOG_LEVEL", ["INFO", "DEBUG", "WARNING", "ERROR"],
                                  index=["INFO", "DEBUG", "WARNING", "ERROR"].index(_g("LOG_LEVEL", "INFO"))
                                  if _g("LOG_LEVEL", "INFO") in ["INFO", "DEBUG", "WARNING", "ERROR"] else 0)
         data_dir = st.text_input("DATA_DIR (자료 저장 경로)", value=_g("DATA_DIR", "data/documents"))
 
-        if st.form_submit_button("💾 기능 플래그 저장", type="primary", use_container_width=True):
+        if st.form_submit_button("💾 안전·검색 설정 저장", type="primary", use_container_width=True):
             _write_env({
                 "POLICY_ENABLED":               "true" if policy_on else "false",
                 "SALVATION_DETECTION_ENABLED":  "true" if salv_det else "false",
@@ -365,62 +360,14 @@ with tab_feat:
                 "LEGALISM_CHECK_ENABLED":       "true" if legalism else "false",
                 "RETRIEVER_BOOST_ENABLED":      "true" if ret_boost else "false",
                 "GOSPEL_CORE_FALLBACK_ENABLED": "true" if gospel_fallback else "false",
-                "TOKEN_QUOTA_ENABLED":          "true" if token_quota else "false",
-                "RATE_LIMIT_ENABLED":           "true" if rate_limit else "false",
                 "LOG_LEVEL":                    log_level,
                 "DATA_DIR":                     data_dir,
             })
-            st.success("✅ 기능 플래그 저장 완료")
+            st.success("✅ 안전·검색 설정 저장 완료")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 탭 6: 쿼터 (무료체험 / 토큰)
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_quota:
-    st.subheader("토큰 쿼터 & 무료체험 설정")
-    with st.form("form_quota"):
-        q1, q2 = st.columns(2)
-        with q1:
-            t_guest   = st.number_input("TOKENS_DAILY_GUEST (게스트 일일 무료 토큰)", 0, 100000, _gi("TOKENS_DAILY_GUEST", 5000))
-            t_member  = st.number_input("TOKENS_MONTHLY_MEMBER (유료회원 월간 토큰)", 0, 10000000, _gi("TOKENS_MONTHLY_MEMBER", 100000), step=10000)
-        with q2:
-            t_support = st.number_input("TOKENS_MONTHLY_SUPPORTER (후원회원 월간 토큰)", 0, 10000000, _gi("TOKENS_MONTHLY_SUPPORTER", 500000), step=10000)
-            t_est     = st.number_input("TOKEN_ESTIMATE_PER_REQUEST (요청당 사전 차감 견적)", 100, 10000, _gi("TOKEN_ESTIMATE_PER_REQUEST", 2000))
-
-        st.divider()
-        st.markdown("#### 무료체험 (rate_limit.py 상수)")
-        st.info("아래 값들은 `backend/app/middleware/rate_limit.py` 상수입니다. 저장 후 코드도 직접 반영돼요.")
-        rl1, rl2, rl3 = st.columns(3)
-        with rl1:
-            trial_days = st.number_input("FREE_TRIAL_DAYS (무료 체험 기간, 일)", 1, 30, 3)
-        with rl2:
-            trial_3h_limit = st.number_input("FREE_TRIAL_3H_LIMIT (3시간당 쿼리 한도)", 1, 100, 10)
-        with rl3:
-            st.caption("적용: 체험 기간 동안 3시간마다 리셋")
-
-        if st.form_submit_button("💾 쿼터 설정 저장", type="primary", use_container_width=True):
-            # .env 업데이트
-            _write_env({
-                "TOKENS_DAILY_GUEST":        str(t_guest),
-                "TOKENS_MONTHLY_MEMBER":     str(t_member),
-                "TOKENS_MONTHLY_SUPPORTER":  str(t_support),
-                "TOKEN_ESTIMATE_PER_REQUEST": str(t_est),
-            })
-            # rate_limit.py 상수 직접 수정
-            rl_path = _ROOT / "backend" / "app" / "middleware" / "rate_limit.py"
-            if rl_path.exists():
-                rl_text = rl_path.read_text(encoding="utf-8")
-                import re
-                rl_text = re.sub(r"FREE_TRIAL_DAYS\s*=\s*\d+",    f"FREE_TRIAL_DAYS = {trial_days}", rl_text)
-                rl_text = re.sub(r"FREE_TRIAL_3H_LIMIT\s*=\s*\d+", f"FREE_TRIAL_3H_LIMIT = {trial_3h_limit}", rl_text)
-                rl_path.write_text(rl_text, encoding="utf-8")
-                st.success(f"✅ 쿼터 저장 완료 (rate_limit.py: 체험 {trial_days}일, {trial_3h_limit}회/3h)")
-            else:
-                st.success("✅ .env 쿼터 저장 완료 (rate_limit.py 파일 없음)")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 탭 7: Langfuse
+# 탭 6: Langfuse
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_lf:
     st.subheader("Langfuse 관측성 설정")
@@ -447,7 +394,7 @@ with tab_lf:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 탭 8: Raw .env 보기 + 현재 백엔드 로드 값
+# 탭 7: Raw .env 보기 + 현재 백엔드 로드 값
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_raw:
     col_raw, col_live = st.columns(2)
@@ -455,7 +402,6 @@ with tab_raw:
     with col_raw:
         st.subheader("📄 .env 파일 원문")
         if ENV_PATH.exists():
-            # 비밀번호/API 키 마스킹해서 표시
             masked_lines = []
             for line in _raw.splitlines():
                 stripped = line.strip()
@@ -483,7 +429,7 @@ with tab_raw:
             for section, vals in live.items():
                 with st.expander(section.upper()):
                     for k, v in vals.items():
-                        color = "#4CAF50" if v and v != "(없음)" and v != "None" else "#888"
+                        color = "#4ADE80" if v and v != "(없음)" and v != "None" else "#6E6E6E"
                         v_str = str(v) if v is not None else "—"
                         st.markdown(
                             f"<code style='color:{color}'>{k}</code> = <code>{v_str}</code>",
@@ -491,3 +437,109 @@ with tab_raw:
                         )
         else:
             st.warning("백엔드 연결 실패 — 서버가 실행 중인지 확인하세요")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 📧 이메일 인증 / 질문 할당량 (런타임 토글, 2026-07-23)
+# ─────────────────────────────────────────────────────────────────────────────
+st.divider()
+st.header("📧 이메일 인증 / 질문 할당량")
+st.caption("런타임 설정 — 저장 즉시 적용 (재시작 불필요). DB(app_setting)에 보관됩니다.")
+
+try:
+    from admin.lib.api_client import get_app_settings, set_app_setting
+
+    _cur = {s["key"]: s for s in (get_app_settings() or [])}
+    _def = lambda k, d: _cur.get(k, {}).get("value", d)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        _v_email = st.checkbox(
+            "이메일 인증 필수 (미인증 로그인 차단)",
+            value=bool(_def("require_email_verification", True)),
+            help="실제 SMTP 발송 모드일 때만 차단. console 모드는 안전판으로 차단 안 함.",
+        )
+    with c2:
+        _v_quota = st.checkbox(
+            "일일 질문 할당량 사용",
+            value=bool(_def("question_quota_enabled", True)),
+        )
+
+    st.subheader("티어별 일일 질문 한도")
+    qc1, qc2, qc3, qc4, qc5 = st.columns(5)
+    _v_anon = qc1.number_input("익명(IP)", min_value=0, value=int(_def("quota_anonymous_daily", 1)), step=1)
+    _v_free = qc2.number_input("무료 로그인", min_value=0, value=int(_def("quota_free_daily", 10)), step=1)
+    _v_std = qc3.number_input("standard", min_value=0, value=int(_def("quota_standard_daily", 50)), step=1)
+    _v_pre = qc4.number_input("premium", min_value=0, value=int(_def("quota_premium_daily", 200)), step=1)
+    _v_life = qc5.number_input("평생(lifetime)", min_value=0, value=int(_def("quota_lifetime_daily", 999999)), step=1)
+
+    if st.button("💾 이메일/할당량 설정 저장", type="primary"):
+        _ok = True
+        for _k, _val in [
+            ("require_email_verification", _v_email),
+            ("question_quota_enabled", _v_quota),
+            ("quota_anonymous_daily", _v_anon),
+            ("quota_free_daily", _v_free),
+            ("quota_standard_daily", _v_std),
+            ("quota_premium_daily", _v_pre),
+            ("quota_lifetime_daily", _v_life),
+        ]:
+            if set_app_setting(_k, _val) is None:
+                _ok = False
+        if _ok:
+            st.success("저장됐어요. 즉시 적용됩니다.")
+        else:
+            st.error("저장 실패 — 백엔드 연결을 확인하세요.")
+except Exception as _e:
+    st.warning(f"런타임 설정 로드 실패: {_e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 📝 주간 메시지 (Weekly Message) — 매주 변경 가능한 인사말
+# ─────────────────────────────────────────────────────────────────────────────
+st.divider()
+st.header("📝 주간 메시지")
+st.caption("사용자 채팅 화면 상단에 표시되는 중요 문구를 매주 변경할 수 있어요. 저장 즉시 적용됩니다.")
+st.info("💡 이번주 추천: 마약중독자만 중독이 아니다, 모든 사람이 중독문제가 있다.")
+
+try:
+    _cur2 = {s["key"]: s for s in (get_app_settings() or [])}
+    _sv2 = lambda k, d: _cur2.get(k, {}).get("value", d) or d
+
+    with st.form("form_greeting_sub"):
+        gc1, gc2, gc3 = st.columns(3)
+        with gc1:
+            _gs_ko = st.text_area(
+                "한국어 메시지",
+                value=_sv2("greeting_sub_ko", "마약중독자만 중독이 아니다, 모든 사람이 중독문제가 있다."),
+                height=100,
+            )
+        with gc2:
+            _gs_zh = st.text_area(
+                "중국어 메시지",
+                value=_sv2("greeting_sub_zh", "不只是吸毒者才会上瘾，每个人都有上瘾的问题。"),
+                height=100,
+            )
+        with gc3:
+            _gs_en = st.text_area(
+                "English Message",
+                value=_sv2("greeting_sub_en", "It's not just drug addicts who have an addiction problem; everyone does."),
+                height=100,
+            )
+
+        if st.form_submit_button("💾 주간 메시지 저장", type="primary", use_container_width=True):
+            _ok = True
+            for _k, _val in [
+                ("greeting_sub_ko", _gs_ko),
+                ("greeting_sub_zh", _gs_zh),
+                ("greeting_sub_en", _gs_en),
+            ]:
+                if set_app_setting(_k, _val) is None:
+                    _ok = False
+            if _ok:
+                st.success("✅ 저장됐어요. 사용자 화면에 즉시 적용됩니다.")
+                st.balloons()
+            else:
+                st.error("저장 실패 — 백엔드 연결을 확인하세요.")
+except Exception as _e:
+    st.warning(f"주간 메시지 로드 실패: {_e}")
