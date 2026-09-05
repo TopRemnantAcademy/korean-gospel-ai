@@ -1,0 +1,36 @@
+{
+  "name": "flow-ai-android",
+  "version": "1.0.0",
+  "description": " — Capacitor Android 래핑 (PWA → APK/AAB)",
+  "private": true,
+  "scripts": {
+    "build:web": "node scripts/build-config.js web",
+    "android:init": "cap add android && node scripts/copy-android-plugins.js",
+    "android:config": "node scripts/build-config.js android --market=hk",
+    "android:config:cn": "node scripts/build-config.js android --market=cn",
+    "android:config:global": "node scripts/build-config.js android --market=global",
+    "android:config:play": "node scripts/build-config.js android --channel=googleplay",
+    "android:sync": "npm run android:config && cap sync android",
+    "android:sync:play": "npm run android:config:play && cap sync android",
+    "open:android": "cap open android",
+    "add:android": "cap add android",
+    "dev": "npx http-server mobile -p 4173 -c-1",
+    "build:apk-debug": "npm run android:sync && cd android && gradlew.bat assembleDebug",
+    "build:apk-release": "npm run android:sync && SET \"JAVA_HOME=C:\\Program Files\\Microsoft\\jdk-17.0.20.8-hotspot\" && cd android && gradlew.bat assembleRelease",
+    "build:aab-release": "npm run android:sync && SET \"JAVA_HOME=C:\\Program Files\\Microsoft\\jdk-17.0.20.8-hotspot\" && cd android && gradlew.bat bundleRelease",
+    "publish:web": "node scripts/publish-apk.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/app": "^6.0.1",
+    "@capacitor/haptics": "^6.0.1",
+    "@capacitor/keyboard": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.1",
+    "@capacitor/splash-screen": "^6.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "http-server": "^14.1.1"
+  }
+}

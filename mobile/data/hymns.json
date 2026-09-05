@@ -1,0 +1,13 @@
+{
+  "hymns": [
+    {"id":1,"number":1,"title":"诗歌 1首","subtitle":"万福根源真上帝","lyrics":["万福根源真上帝","万民齐来颂赞","众天使同颂扬","父子和圣灵"],"category":"赞美","favorite":true,"duration":18},
+    {"id":2,"number":28,"title":"诗歌 28首","subtitle":"求主降临赐福源","lyrics":["福源求主降临","使我们能颂赞","愿天父旨意","行在地上"],"category":"赞美","favorite":false,"duration":16},
+    {"id":3,"number":96,"title":"诗歌 96首","subtitle":"耶稣究竟是谁","lyrics":["耶稣究竟是谁","是我们众救主","被钉十字架上","赦免我众罪辜"],"category":"赞美","favorite":true,"duration":17},
+    {"id":4,"number":135,"title":"诗歌 135首","subtitle":"求主开启我盲眼","lyrics":["开启我昏暗眼","使我得见主路","以圣灵充满心","求主引导我途"],"category":"祷告","favorite":false,"duration":19},
+    {"id":5,"number":304,"title":"诗歌 304首","subtitle":"神那伟大的爱","lyrics":["神那伟大奇妙爱","非言语所能述","从高天之上处","赐给了我们"],"category":"恩典","favorite":false,"duration":20},
+    {"id":6,"number":310,"title":"诗歌 310首","subtitle":"啊，因神的恩典","lyrics":["啊，因神恩典","我这无用的人","为何赐我这恩典","实在奇妙可畏"],"category":"恩典","favorite":true,"duration":21},
+    {"id":7,"number":405,"title":"诗歌 405首","subtitle":"投入主慈爱怀中","lyrics":["投入主慈爱臂膀","安息在我主怀","投进永恒膀臂","在主怀里安息"],"category":"安慰","favorite":false,"duration":16},
+    {"id":8,"number":412,"title":"诗歌 412首","subtitle":"我灵深蒙恩典","lyrics":["我灵深蒙恩典","因信主耶稣","倚靠救主宝血","我安然前往"],"category":"信仰","favorite":false,"duration":19}
+  ],
+  "recent": [3, 1, 6]
+}

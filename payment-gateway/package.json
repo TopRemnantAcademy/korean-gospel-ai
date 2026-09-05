@@ -1,0 +1,23 @@
+{
+  "name": "gospel-pay-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "apps/api",
+    "apps/user-web",
+    "apps/admin-web"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w apps/api",
+    "dev:user": "npm run dev -w apps/user-web",
+    "dev:admin": "npm run dev -w apps/admin-web",
+    "build:shared": "npm run build -w packages/shared",
+    "build:api": "npm run build -w apps/api",
+    "build:user": "npm run build -w apps/user-web",
+    "build:admin": "npm run build -w apps/admin-web",
+    "build": "npm run build:shared && npm run build:api && npm run build:user && npm run build:admin",
+    "start:api": "npm run start -w apps/api",
+    "test:api": "npm run test -w apps/api"
+  }
+}

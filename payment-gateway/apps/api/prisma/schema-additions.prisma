@@ -1,0 +1,92 @@
+// Add these models to the existing schema.prisma file
+
+model Notification {
+  id          String    @id @default(uuid())
+  type        String
+  severity    String
+  title       String
+  message     String
+  metadata    Json?
+  paymentId   String?
+  userId      String?
+  isRead      Boolean   @default(false)
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([severity])
+}
+
+model IdempotencyKey {
+  id          String    @id @default(uuid())
+  key         String    @unique
+  operation   String
+  requestBody Json?
+  response    Json?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([key])
+  @@index([expiresAt])
+}
+
+model SessionToken {
+  id           String    @id @default(uuid())
+  userId       String
+  tokenHash    String    @unique
+  userAgent    String?
+  ipAddress    String?
+  lastActivity DateTime  @default(now())
+  expiresAt    DateTime
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
+model FailedLoginAttempt {
+  id          String    @id @default(uuid())
+  email       String
+  ipAddress   String
+  userAgent   String?
+  reason      String
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+  @@index([ipAddress])
+  @@index([createdAt])
+}
+
+model ApiAccessLog {
+  id          String    @id @default(uuid())
+  userId      String?
+  endpoint    String
+  method      String
+  ipAddress   String
+  userAgent   String?
+  statusCode  Int
+  duration    Int       // milliseconds
+  requestBody Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([endpoint])
+  @@index([createdAt])
+}
+
+model CircuitBreaker {
+  id              String    @id @default(uuid())
+  serviceName     String    @unique
+  status          String    // 'CLOSED', 'OPEN', 'HALF_OPEN'
+  failureCount    Int       @default(0)
+  successCount    Int       @default(0)
+  lastFailureAt   DateTime?
+  lastSuccessAt   DateTime?
+  nextRetryAt     DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  @@index([serviceName])
+}

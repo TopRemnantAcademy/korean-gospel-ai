@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <!-- L-1: 首屏绘制前应用系统语言(FOUC 방지). 히라기/한/zh/zh-TW 매핑.
+       실제 UI 번역은 런타임에 AppState.uiLang 또는 시스템 언어로 uiT()가 처리. -->
+  <script>
+    (function () {
+      try {
+        var raw = navigator.language || (navigator.languages && navigator.languages[0]) || 'en';
+        var l = String(raw).toLowerCase();
+        var code = l.indexOf('ko') === 0 ? 'ko'
+          : l.indexOf('zh') === 0 ? (l.indexOf('tw') >= 0 || l.indexOf('hant') >= 0 ? 'zh-TW' : 'zh-CN')
+          : l.indexOf('en') === 0 ? 'en' : 'en';
+        document.documentElement.lang = code;
+      } catch (e) { document.documentElement.lang = 'en'; }
+    })();
+  </script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0C0A08">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <!-- U-9: 首屏绘制前应用已保存的深色主题，避免 FOUC（亮→暗闪烁） -->
+  <script>
+    if (localStorage.getItem('gospel_dark') !== 'false') {
+      document.documentElement.classList.add('dark');
+    }
+  </script>
+  <title>FLOW</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <!-- CJK-1: 中文字体改用系统字体栈，禁止从 fonts.googleapis.com 在线加载。
+       原因：中国大陆 Google 字体 CDN 被墙，会导致首屏长时间白屏/卡顿。
+       安卓 WebView 原生支持系统 CJK 字体（思源/Noto 系列），无需在线字体。 -->
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles-media.css">
+  <!-- CJK-2: Google Identity Services (GIS) 条件加载。
+       中国大陆无 Google 框架，gsi/client 必然加载失败；改为「非中国构建」才注入，
+       且加载失败不影响应用运行（AuthService.loginWithGoogle 已有降级提示）。
+       构建时由 scripts/build-config.js 把此处的占位标记替换为
+       GIS <script> 标签（海外）或空字符串（中国）。
+       默认（未注入）不加载，确保中国 APK 零 Google 依赖。 -->
+  __GOSPEL_GOOGLE_SDK__
+</head>
+<body>
+  <div id="app"></div>
+  <!-- 后端 API 地址设置。请按生产环境通过构建/部署配置固定。
+       ⚠️ P4 #7: 基于查询参数(?api=)的覆盖方式因 SSRF/开放重定向风险已移除。
+       API_BASE 仅由显式构建常量(window.GOSPEL_API_BASE) 决定。
+       → 该值在构建时由 scripts/build-config.js 注入（中国市场用国内域名）。 -->
+  <script>
+    (function () {
+      window.GOSPEL_API_BASE = window.GOSPEL_API_BASE || '__GOSPEL_API_BASE__';
+      // 결제 채널: 'direct'(기본, PortOne 단일 SDK 로 한국카드+중국 위챗/알리페이 커버)
+      //           'googleplay'(GP 상점용 — Google Play Billing 전용, 제3자 결제 코드 0).
+      // 빌드 시 scripts/build-config.js 가 치환. GP 빌드 시 openPayment 가 PortOne 을 호출하지 않음.
+      window.GOSPEL_PAYMENT_CHANNEL = window.GOSPEL_PAYMENT_CHANNEL || '__GOSPEL_PAYMENT_CHANNEL__';
+    })();
+  </script>
+  <!-- PortOne V2 결제 SDK (2026-07-30).
+       동일한 중국/홍콩 접근성 전략: __GOSPEL_GOOGLE_SDK__ 과 마찬가지로
+       빌드 시 scripts/build-config.js 가 이 플레이스홀더를
+       PortOne <script> 태그(해외/홍콩) 또는 빈 문자열(중국)로 치환.
+       기본(미주입)은 빈 문자열 → 중국 APK 는 zero 외부 SDK 의존.
+       (window.PortOne undefined 시 openPayment 가 브라우저 안내로 우아하게 폴백함) -->
+  __GOSPEL_PORTONE_SDK__
+  <script defer src="./utils/platform.js"></script>
+  <script defer src="./utils/dom.js"></script>
+  <script defer src="./utils/state.js"></script>
+  <script defer src="./utils/offline.js"></script>
+  <script defer src="./components/index.js"></script>
+  <script defer src="./services/index.js"></script>
+  <script defer src="./screens/index.js"></script>
+  <script defer src="./player.js"></script>
+  <script defer src="./services/event.js"></script>
+  <script defer src="./app.js"></script>
+</body>
+</html>

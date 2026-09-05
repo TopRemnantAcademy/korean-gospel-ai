@@ -1,0 +1,135 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: gospel-pay-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-gospel_pay_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Database password required}
+      POSTGRES_DB: gospel_pay_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-gospel_pay_admin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    container_name: gospel-pay-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Redis password required} --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: gospel-pay-api
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-gospel_pay_admin}:${DB_PASSWORD}@db:5432/gospel_pay_db?schema=public
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - PORT=5000
+      - NODE_ENV=${NODE_ENV:-production}
+      - JWT_SECRET=${JWT_SECRET:?JWT secret required}
+      - KOREA_SECRET_SALT_KEY=${KOREA_SECRET_SALT_KEY:?Korea salt key required}
+      - PII_ENCRYPTION_KEY=${PII_ENCRYPTION_KEY:?PII encryption key required}
+      - PII_HASH_PEPPER=${PII_HASH_PEPPER:?PII hash pepper required}
+      - SSO_JWT_SECRET=${SSO_JWT_SECRET:?SSO JWT secret required}
+      - SSO_REDIRECT_ALLOWLIST=${SSO_REDIRECT_ALLOWLIST:-https://china-worksite.example.com}
+      - PG_API_SECRET_KEY=${PG_API_SECRET_KEY:?PG API secret key required}
+      - TAX_INVOICE_API_KEY=${TAX_INVOICE_API_KEY:?Tax invoice API key required}
+      - CHINA_CREDIT_API_URL=${CHINA_CREDIT_API_URL:-https://api.china-worksite.example.com/credit/topup}
+      - CHINA_CREDIT_API_KEY=${CHINA_CREDIT_API_KEY:?China credit API key required}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-piaoyhyh@gmail.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?Admin password required}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+      - frontend
+
+  user-web:
+    build:
+      context: .
+      dockerfile: apps/user-web/Dockerfile
+    container_name: gospel-pay-user-web
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - frontend
+
+  admin-web:
+    build:
+      context: .
+      dockerfile: apps/admin-web/Dockerfile
+    container_name: gospel-pay-admin-web
+    ports:
+      - "5174:80"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - frontend
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge

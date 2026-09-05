@@ -1,0 +1,468 @@
+{
+ "version": "King James Version (KJV)",
+ "source": "github.com/arleym/kjv-markdown (Public Domain)",
+ "bible_books": [
+  {
+   "id": "Genesis",
+   "name": "Genesis",
+   "short": "G",
+   "chapters": 50,
+   "testament": "old"
+  },
+  {
+   "id": "Exodus",
+   "name": "Exodus",
+   "short": "E",
+   "chapters": 40,
+   "testament": "old"
+  },
+  {
+   "id": "Leviticus",
+   "name": "Leviticus",
+   "short": "L",
+   "chapters": 27,
+   "testament": "old"
+  },
+  {
+   "id": "Numbers",
+   "name": "Numbers",
+   "short": "N",
+   "chapters": 36,
+   "testament": "old"
+  },
+  {
+   "id": "Deuteronomy",
+   "name": "Deuteronomy",
+   "short": "D",
+   "chapters": 34,
+   "testament": "old"
+  },
+  {
+   "id": "Joshua",
+   "name": "Joshua",
+   "short": "J",
+   "chapters": 24,
+   "testament": "old"
+  },
+  {
+   "id": "Judges",
+   "name": "Judges",
+   "short": "J",
+   "chapters": 21,
+   "testament": "old"
+  },
+  {
+   "id": "Ruth",
+   "name": "Ruth",
+   "short": "R",
+   "chapters": 4,
+   "testament": "old"
+  },
+  {
+   "id": "1 Samuel",
+   "name": "1 Samuel",
+   "short": "S",
+   "chapters": 31,
+   "testament": "old"
+  },
+  {
+   "id": "2 Samuel",
+   "name": "2 Samuel",
+   "short": "S",
+   "chapters": 24,
+   "testament": "old"
+  },
+  {
+   "id": "1 Kings",
+   "name": "1 Kings",
+   "short": "K",
+   "chapters": 22,
+   "testament": "old"
+  },
+  {
+   "id": "2 Kings",
+   "name": "2 Kings",
+   "short": "K",
+   "chapters": 25,
+   "testament": "old"
+  },
+  {
+   "id": "1 Chronicles",
+   "name": "1 Chronicles",
+   "short": "C",
+   "chapters": 29,
+   "testament": "old"
+  },
+  {
+   "id": "2 Chronicles",
+   "name": "2 Chronicles",
+   "short": "C",
+   "chapters": 36,
+   "testament": "old"
+  },
+  {
+   "id": "Ezra",
+   "name": "Ezra",
+   "short": "E",
+   "chapters": 10,
+   "testament": "old"
+  },
+  {
+   "id": "Nehemiah",
+   "name": "Nehemiah",
+   "short": "N",
+   "chapters": 13,
+   "testament": "old"
+  },
+  {
+   "id": "Esther",
+   "name": "Esther",
+   "short": "E",
+   "chapters": 10,
+   "testament": "old"
+  },
+  {
+   "id": "Job",
+   "name": "Job",
+   "short": "J",
+   "chapters": 42,
+   "testament": "old"
+  },
+  {
+   "id": "Psalms",
+   "name": "Psalms",
+   "short": "P",
+   "chapters": 150,
+   "testament": "old"
+  },
+  {
+   "id": "Proverbs",
+   "name": "Proverbs",
+   "short": "P",
+   "chapters": 31,
+   "testament": "old"
+  },
+  {
+   "id": "Ecclesiastes",
+   "name": "Ecclesiastes",
+   "short": "E",
+   "chapters": 12,
+   "testament": "old"
+  },
+  {
+   "id": "Song of Solomon",
+   "name": "Song of Solomon",
+   "short": "S",
+   "chapters": 8,
+   "testament": "old"
+  },
+  {
+   "id": "Isaiah",
+   "name": "Isaiah",
+   "short": "I",
+   "chapters": 66,
+   "testament": "old"
+  },
+  {
+   "id": "Jeremiah",
+   "name": "Jeremiah",
+   "short": "J",
+   "chapters": 52,
+   "testament": "old"
+  },
+  {
+   "id": "Lamentations",
+   "name": "Lamentations",
+   "short": "L",
+   "chapters": 5,
+   "testament": "old"
+  },
+  {
+   "id": "Ezekiel",
+   "name": "Ezekiel",
+   "short": "E",
+   "chapters": 48,
+   "testament": "old"
+  },
+  {
+   "id": "Daniel",
+   "name": "Daniel",
+   "short": "D",
+   "chapters": 12,
+   "testament": "old"
+  },
+  {
+   "id": "Hosea",
+   "name": "Hosea",
+   "short": "H",
+   "chapters": 14,
+   "testament": "old"
+  },
+  {
+   "id": "Joel",
+   "name": "Joel",
+   "short": "J",
+   "chapters": 3,
+   "testament": "old"
+  },
+  {
+   "id": "Amos",
+   "name": "Amos",
+   "short": "A",
+   "chapters": 9,
+   "testament": "old"
+  },
+  {
+   "id": "Obadiah",
+   "name": "Obadiah",
+   "short": "O",
+   "chapters": 1,
+   "testament": "old"
+  },
+  {
+   "id": "Jonah",
+   "name": "Jonah",
+   "short": "J",
+   "chapters": 4,
+   "testament": "old"
+  },
+  {
+   "id": "Micah",
+   "name": "Micah",
+   "short": "M",
+   "chapters": 7,
+   "testament": "old"
+  },
+  {
+   "id": "Nahum",
+   "name": "Nahum",
+   "short": "N",
+   "chapters": 3,
+   "testament": "old"
+  },
+  {
+   "id": "Habakkuk",
+   "name": "Habakkuk",
+   "short": "H",
+   "chapters": 3,
+   "testament": "old"
+  },
+  {
+   "id": "Zephaniah",
+   "name": "Zephaniah",
+   "short": "Z",
+   "chapters": 3,
+   "testament": "old"
+  },
+  {
+   "id": "Haggai",
+   "name": "Haggai",
+   "short": "H",
+   "chapters": 2,
+   "testament": "old"
+  },
+  {
+   "id": "Zechariah",
+   "name": "Zechariah",
+   "short": "Z",
+   "chapters": 14,
+   "testament": "old"
+  },
+  {
+   "id": "Malachi",
+   "name": "Malachi",
+   "short": "M",
+   "chapters": 4,
+   "testament": "old"
+  },
+  {
+   "id": "Matthew",
+   "name": "Matthew",
+   "short": "M",
+   "chapters": 28,
+   "testament": "new"
+  },
+  {
+   "id": "Mark",
+   "name": "Mark",
+   "short": "M",
+   "chapters": 16,
+   "testament": "new"
+  },
+  {
+   "id": "Luke",
+   "name": "Luke",
+   "short": "L",
+   "chapters": 24,
+   "testament": "new"
+  },
+  {
+   "id": "John",
+   "name": "John",
+   "short": "J",
+   "chapters": 21,
+   "testament": "new"
+  },
+  {
+   "id": "Acts",
+   "name": "Acts",
+   "short": "A",
+   "chapters": 28,
+   "testament": "new"
+  },
+  {
+   "id": "Romans",
+   "name": "Romans",
+   "short": "R",
+   "chapters": 16,
+   "testament": "new"
+  },
+  {
+   "id": "1 Corinthians",
+   "name": "1 Corinthians",
+   "short": "C",
+   "chapters": 16,
+   "testament": "new"
+  },
+  {
+   "id": "2 Corinthians",
+   "name": "2 Corinthians",
+   "short": "C",
+   "chapters": 13,
+   "testament": "new"
+  },
+  {
+   "id": "Galatians",
+   "name": "Galatians",
+   "short": "G",
+   "chapters": 6,
+   "testament": "new"
+  },
+  {
+   "id": "Ephesians",
+   "name": "Ephesians",
+   "short": "E",
+   "chapters": 6,
+   "testament": "new"
+  },
+  {
+   "id": "Philippians",
+   "name": "Philippians",
+   "short": "P",
+   "chapters": 4,
+   "testament": "new"
+  },
+  {
+   "id": "Colossians",
+   "name": "Colossians",
+   "short": "C",
+   "chapters": 4,
+   "testament": "new"
+  },
+  {
+   "id": "1 Thessalonians",
+   "name": "1 Thessalonians",
+   "short": "T",
+   "chapters": 5,
+   "testament": "new"
+  },
+  {
+   "id": "2 Thessalonians",
+   "name": "2 Thessalonians",
+   "short": "T",
+   "chapters": 3,
+   "testament": "new"
+  },
+  {
+   "id": "1 Timothy",
+   "name": "1 Timothy",
+   "short": "T",
+   "chapters": 6,
+   "testament": "new"
+  },
+  {
+   "id": "2 Timothy",
+   "name": "2 Timothy",
+   "short": "T",
+   "chapters": 4,
+   "testament": "new"
+  },
+  {
+   "id": "Titus",
+   "name": "Titus",
+   "short": "T",
+   "chapters": 3,
+   "testament": "new"
+  },
+  {
+   "id": "Philemon",
+   "name": "Philemon",
+   "short": "P",
+   "chapters": 1,
+   "testament": "new"
+  },
+  {
+   "id": "Hebrews",
+   "name": "Hebrews",
+   "short": "H",
+   "chapters": 13,
+   "testament": "new"
+  },
+  {
+   "id": "James",
+   "name": "James",
+   "short": "J",
+   "chapters": 5,
+   "testament": "new"
+  },
+  {
+   "id": "1 Peter",
+   "name": "1 Peter",
+   "short": "P",
+   "chapters": 5,
+   "testament": "new"
+  },
+  {
+   "id": "2 Peter",
+   "name": "2 Peter",
+   "short": "P",
+   "chapters": 3,
+   "testament": "new"
+  },
+  {
+   "id": "1 John",
+   "name": "1 John",
+   "short": "J",
+   "chapters": 5,
+   "testament": "new"
+  },
+  {
+   "id": "2 John",
+   "name": "2 John",
+   "short": "J",
+   "chapters": 1,
+   "testament": "new"
+  },
+  {
+   "id": "3 John",
+   "name": "3 John",
+   "short": "J",
+   "chapters": 1,
+   "testament": "new"
+  },
+  {
+   "id": "Jude",
+   "name": "Jude",
+   "short": "J",
+   "chapters": 1,
+   "testament": "new"
+  },
+  {
+   "id": "Revelation",
+   "name": "Revelation",
+   "short": "R",
+   "chapters": 22,
+   "testament": "new"
+  }
+ ]
+}

@@ -1,0 +1,494 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrderStatus {
+  INITIATED
+  AUTHORIZED
+  PENDING_DEPOSIT
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  INITIATED
+  AUTHORIZED
+  PENDING_DEPOSIT
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  EXPIRED
+}
+
+enum DocumentIssueStatus {
+  READY
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum CashReceiptStatus {
+  READY
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum DispatchStatus {
+  READY
+  PROCESSING
+  SENT
+  CONFIRMED
+  FAILED
+  REVERSED
+}
+
+enum RefundStatus {
+  REQUESTED
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum ReceiptType {
+  NONE
+  TAX_INVOICE
+  INVOICE
+  CASH_RECEIPT
+  PERSONAL_RECEIPT
+}
+
+enum CashReceiptType {
+  INCOME_DEDUCTION
+  EXPENSE_PROOF
+}
+
+enum CashReceiptIdentityType {
+  PHONE
+  PERSONAL_ID
+  BUSINESS_REG_NO
+}
+
+enum InvoiceType {
+  TAX_INVOICE
+  INVOICE
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  OPS_ADMIN
+  FINANCE_ADMIN
+  DEVELOPER
+  READONLY
+}
+
+enum ReconciliationStatus {
+  UNRECONCILED
+  AUTO_MATCHED
+  MANUALLY_ADJUSTED
+  DISCREPANCY_FLAGGED
+  RECONCILED
+  PARTIAL
+}
+
+enum TraceStage {
+  PG_PAYMENT
+  CREDIT_DISPATCH
+  TAX_DOCUMENT
+  CASH_RECEIPT
+  CHINA_WEBHOOK
+}
+
+enum TraceStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  RETRYING
+}
+
+model User {
+  id               String          @id @default(uuid())
+  uid              String          @unique
+  provider         String
+  providerSubject  String
+  emailEncrypted   String?
+  emailHash        String?         @unique
+  phoneEncrypted   String?
+  phoneHash        String?         @unique
+  phoneLast4       String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  lastLoginAt      DateTime?
+  isDeleted        Boolean         @default(false)
+  deletedAt        DateTime?
+  registeredIp     String?
+  
+  paymentOrders    PaymentOrder[]
+  payments         Payment[]
+  consentRecords   ConsentRecord[]
+
+  @@unique([provider, providerSubject])
+  @@index([emailHash])
+  @@index([phoneHash])
+}
+
+model PaymentOrder {
+  id                     String         @id @default(uuid())
+  paymentUuid            String         @unique @default(uuid())
+  userId                 String
+  user                   User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  productCode            String
+  productNameSnapshot    String
+  amountTotalSnapshot    Int
+  creditAmountSnapshot   Int
+  selectedPaymentMethod  String
+  invoiceRequested       Boolean        @default(false)
+  cashReceiptRequested   Boolean        @default(false)
+  orderStatus            OrderStatus    @default(INITIATED)
+  expiresAt              DateTime
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  payments               Payment[]
+
+  @@index([userId])
+  @@index([orderStatus])
+}
+
+model Payment {
+  id                          String          @id @default(uuid())
+  paymentUuid                 String          @unique
+  paymentOrderId              String
+  paymentOrder                PaymentOrder    @relation(fields: [paymentOrderId], references: [id], onDelete: Restrict)
+  userId                      String
+  user                        User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userUid                     String
+  pgProvider                  String
+  pgTransactionId             String?         @unique
+  pgOrderId                   String          @unique
+  paymentMethod               String
+  currency                    String          @default("KRW")
+  amountTotal                 Int
+  amountSupply                Int
+  amountVat                   Int
+  paymentStatus               PaymentStatus   @default(INITIATED)
+  receiptType                 ReceiptType     @default(NONE)
+  invoiceRequestStatus        DocumentIssueStatus?
+  invoiceType                 InvoiceType?
+  invoiceDocumentId           String?
+  creditAmount                Int
+  creditStatus                DispatchStatus  @default(READY)
+  creditedAt                  DateTime?
+  companyRegNumberEncrypted   String?
+  companyRegNumberHash        String?
+  companyName                 String?
+  ceoName                     String?
+  taxEmailEncrypted           String?
+  taxEmailHash                String?
+  failReason                  String?
+  rawPgPayload                Json?
+  paidAt                      DateTime?
+  cancelledAt                 DateTime?
+  refundedAt                  DateTime?
+  metadata                    Json?
+  createdAt                   DateTime        @default(now())
+  updatedAt                   DateTime        @updatedAt
+  remittanceId                String?
+  remittance                  Remittance?     @relation(fields: [remittanceId], references: [id])
+  traceLogs                   PaymentTraceLog[]
+
+  taxDocuments                TaxDocument[]
+  cashReceipts                CashReceipt[]
+  creditDispatches            CreditDispatch[]
+  refunds                     Refund[]
+  consentRecords              ConsentRecord[]
+  externalCallLogs            ExternalCallLog[]
+
+  @@index([userUid])
+  @@index([paymentStatus])
+  @@index([paymentOrderId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model TaxDocument {
+  id                  String              @id @default(uuid())
+  paymentId           String
+  payment             Payment             @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceType         InvoiceType
+  provider            String
+  issueStatus         DocumentIssueStatus @default(READY)
+  providerDocumentId  String?
+  issueAttempts       Int                 @default(0)
+  lastErrorMessage    String?
+  requestedAt         DateTime            @default(now())
+  issuedAt            DateTime?
+  updatedAt           DateTime            @updatedAt
+
+  @@index([paymentId])
+}
+
+model CashReceipt {
+  id                       String                  @id @default(uuid())
+  paymentId                String
+  payment                  Payment                 @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  receiptStatus            CashReceiptStatus       @default(READY)
+  receiptType              CashReceiptType
+  identityType             CashReceiptIdentityType
+  identityValueEncrypted   String
+  identityHash             String
+  provider                 String
+  providerReceiptId        String?
+  attempts                 Int                     @default(0)
+  lastErrorMessage         String?
+  requestedAt              DateTime                @default(now())
+  issuedAt                 DateTime?
+  updatedAt                DateTime                @updatedAt
+
+  @@index([paymentId])
+}
+
+model CreditDispatch {
+  id               String         @id @default(uuid())
+  paymentId        String
+  payment          Payment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  uid              String
+  creditedAmount   Int
+  dispatchStatus   DispatchStatus @default(READY)
+  attempts         Int            @default(0)
+  lastErrorMessage String?
+  requestPayload   Json?
+  responsePayload  Json?
+  dispatchedAt     DateTime?
+  confirmedAt      DateTime?
+  updatedAt        DateTime       @updatedAt
+
+  @@index([paymentId])
+}
+
+model Refund {
+  id                             String        @id @default(uuid())
+  paymentId                      String
+  payment                        Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  refundUuid                     String        @unique @default(uuid())
+  refundAmount                   Int
+  refundReason                   String
+  refundStatus                   RefundStatus  @default(REQUESTED)
+  partialRefund                  Boolean       @default(false)
+  pgRefundId                     String?
+  requiresRefundAccount          Boolean       @default(false)
+  refundBankCode                 String?
+  refundAccountNumberEncrypted  String?
+  refundAccountHolder            String?
+  creditReversalStatus           DispatchStatus @default(READY)
+  taxAdjustmentStatus            DocumentIssueStatus @default(READY)
+  requestedByAdminId             String
+  requestedByAdmin               AdminUser     @relation(fields: [requestedByAdminId], references: [id])
+  metadata                       Json?
+  createdAt                      DateTime      @default(now())
+  updatedAt                      DateTime      @updatedAt
+
+  @@index([paymentId])
+  @@index([requestedByAdminId])
+}
+
+model ConsentRecord {
+  id                 String     @id @default(uuid())
+  userId             String?
+  user               User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  paymentId          String?
+  payment            Payment?   @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  consentType        String
+  version            String
+  agreed             Boolean
+  disclosedItems     Json
+  country            String
+  transferTimeDesc   String
+  transferMethod     String
+  recipientName      String
+  recipientContact   String
+  purpose            String
+  retentionPeriod    String
+  refusalMethod      String
+  refusalEffect      String
+  ipAddress          String
+  userAgent          String
+  createdAt          DateTime   @default(now())
+
+  @@index([userId])
+  @@index([paymentId])
+}
+
+model PaymentMethodConfig {
+  id                            String   @id @default(uuid())
+  paymentMethod                 String   @unique
+  enabled                       Boolean  @default(true)
+  pgProvider                    String
+  displayName                   String
+  sortOrder                     Int      @default(0)
+  supportsRefund                Boolean  @default(true)
+  supportsPartialRefund         Boolean  @default(true)
+  supportsCashReceipt           Boolean  @default(false)
+  supportsVirtualAccountExpiry  Boolean  @default(false)
+  supportsAutoRefund            Boolean  @default(true)
+  
+  // API Configuration (Encrypted)
+  apiKeyEncrypted               String?
+  apiKeyHash                    String?
+  secretKeyEncrypted            String?
+  secretKeyHash                 String?
+  clientIdEncrypted             String?
+  clientIdHash                  String?
+  merchantIdEncrypted           String?
+  merchantIdHash                String?
+  
+  // URL Configuration
+  webhookUrl                    String?
+  successUrl                    String?
+  failUrl                       String?
+  cancelUrl                     String?
+  callbackUrl                   String?
+  
+  // Mode Configuration
+  isTestMode                    Boolean  @default(true)
+  
+  // Additional Configuration
+  metadata                      Json?
+  updatedAt                     DateTime @updatedAt
+
+  @@index([paymentMethod])
+  @@index([enabled])
+}
+
+model ExternalCallLog {
+  id                String    @id @default(uuid())
+  domain            String
+  direction         String    
+  relatedPaymentId  String?
+  payment           Payment?  @relation(fields: [relatedPaymentId], references: [id], onDelete: SetNull)
+  relatedRefundId   String?
+  requestId         String?
+  targetUrl         String
+  requestHeaders    Json?
+  requestBody       Json?
+  responseStatus    Int?
+  responseBody      Json?
+  success           Boolean
+  errorMessage      String?
+  createdAt         DateTime  @default(now())
+
+  @@index([relatedPaymentId])
+  @@index([relatedRefundId])
+  @@index([createdAt])
+}
+
+model AdminUser {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  role         AdminRole   @default(READONLY)
+  isActive     Boolean     @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  auditLogs    AdminAuditLog[]
+  refundRequests Refund[]
+}
+
+model AdminAuditLog {
+  id           String      @id @default(uuid())
+  adminUserId  String?
+  adminUser    AdminUser?   @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  action       String
+  entityType   String
+  entityId     String
+  beforeJson   Json?
+  afterJson    Json?
+  ipAddress    String
+  createdAt    DateTime    @default(now())
+
+  @@index([adminUserId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+model DataRetentionPolicy {
+  id             String    @id @default(uuid())
+  dataCategory   String    @unique
+  retentionDays  Int
+  disposalMethod String    
+  isActive       Boolean   @default(true)
+  updatedAt      DateTime  @updatedAt
+}
+
+model Remittance {
+  id              String        @id @default(uuid())
+  remittedAt      DateTime
+  remittanceKey   String        @unique
+  bankName        String
+  amountUsd       Int           // Stored in cents to avoid float precision issues
+  exchangeRate    Int           // Stored as basis points (e.g., 138550 = 1385.50)
+  amountKrw       Int
+  feeUsd          Int           // Stored in cents
+  feeKrw          Int
+  justification   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  payments        Payment[]
+  reconciliations ReconciliationLog[]
+}
+
+model ReconciliationLog {
+  id                  String             @id @default(uuid())
+  targetMonth         String             // Format: "YYYY-MM"
+  status              ReconciliationStatus @default(UNRECONCILED)
+  remittanceId        String?            @unique
+  remittance          Remittance?        @relation(fields: [remittanceId], references: [id], onDelete: SetNull)
+  matchedPaymentsCount Int
+  totalPgAmountKrw    Int
+  totalTaxDocAmountKrw Int
+  totalRemittanceKrw   Int
+  varianceAmountKrw   Int
+  feeVarianceKrw      Int
+  fxLossKrw           Int        @default(0)
+  fxGainKrw           Int        @default(0)
+  notes               String?
+  verifiedByAdminId   String?
+  verifiedAt          DateTime?
+  reconciledBy        String?
+  reconciledAt        DateTime?
+  metadata            Json?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  @@unique([targetMonth])
+  @@index([targetMonth])
+}
+
+model PaymentTraceLog {
+  id         String      @id @default(uuid())
+  paymentId  String
+  payment    Payment     @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  stage      TraceStage
+  status     TraceStatus
+  message    String
+  payload    Json?
+  createdAt  DateTime    @default(now())
+
+  @@index([paymentId])
+}

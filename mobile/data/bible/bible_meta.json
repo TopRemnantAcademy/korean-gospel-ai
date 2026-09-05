@@ -1,0 +1,468 @@
+{
+ "version": "简体中文和合本 (CUV Simplified)",
+ "source": "bible_简体中文和合本.db",
+ "bible_books": [
+  {
+   "id": "创世记",
+   "name": "创世记",
+   "short": "创",
+   "chapters": 50,
+   "testament": "old"
+  },
+  {
+   "id": "出埃及记",
+   "name": "出埃及记",
+   "short": "出",
+   "chapters": 40,
+   "testament": "old"
+  },
+  {
+   "id": "利未记",
+   "name": "利未记",
+   "short": "利",
+   "chapters": 27,
+   "testament": "old"
+  },
+  {
+   "id": "民数记",
+   "name": "民数记",
+   "short": "民",
+   "chapters": 36,
+   "testament": "old"
+  },
+  {
+   "id": "申命记",
+   "name": "申命记",
+   "short": "申",
+   "chapters": 34,
+   "testament": "old"
+  },
+  {
+   "id": "约书亚记",
+   "name": "约书亚记",
+   "short": "书",
+   "chapters": 24,
+   "testament": "old"
+  },
+  {
+   "id": "士师记",
+   "name": "士师记",
+   "short": "士",
+   "chapters": 21,
+   "testament": "old"
+  },
+  {
+   "id": "路得记",
+   "name": "路得记",
+   "short": "得",
+   "chapters": 4,
+   "testament": "old"
+  },
+  {
+   "id": "撒母耳记上",
+   "name": "撒母耳记上",
+   "short": "撒上",
+   "chapters": 31,
+   "testament": "old"
+  },
+  {
+   "id": "撒母耳记下",
+   "name": "撒母耳记下",
+   "short": "撒下",
+   "chapters": 24,
+   "testament": "old"
+  },
+  {
+   "id": "列王纪上",
+   "name": "列王纪上",
+   "short": "王上",
+   "chapters": 22,
+   "testament": "old"
+  },
+  {
+   "id": "列王纪下",
+   "name": "列王纪下",
+   "short": "王下",
+   "chapters": 25,
+   "testament": "old"
+  },
+  {
+   "id": "历代志上",
+   "name": "历代志上",
+   "short": "代上",
+   "chapters": 29,
+   "testament": "old"
+  },
+  {
+   "id": "历代志下",
+   "name": "历代志下",
+   "short": "代下",
+   "chapters": 36,
+   "testament": "old"
+  },
+  {
+   "id": "以斯拉记",
+   "name": "以斯拉记",
+   "short": "拉",
+   "chapters": 10,
+   "testament": "old"
+  },
+  {
+   "id": "尼希米记",
+   "name": "尼希米记",
+   "short": "尼",
+   "chapters": 13,
+   "testament": "old"
+  },
+  {
+   "id": "以斯帖记",
+   "name": "以斯帖记",
+   "short": "斯",
+   "chapters": 10,
+   "testament": "old"
+  },
+  {
+   "id": "约伯记",
+   "name": "约伯记",
+   "short": "伯",
+   "chapters": 42,
+   "testament": "old"
+  },
+  {
+   "id": "诗篇",
+   "name": "诗篇",
+   "short": "诗",
+   "chapters": 150,
+   "testament": "old"
+  },
+  {
+   "id": "箴言",
+   "name": "箴言",
+   "short": "箴",
+   "chapters": 31,
+   "testament": "old"
+  },
+  {
+   "id": "传道书",
+   "name": "传道书",
+   "short": "传",
+   "chapters": 12,
+   "testament": "old"
+  },
+  {
+   "id": "雅歌",
+   "name": "雅歌",
+   "short": "歌",
+   "chapters": 8,
+   "testament": "old"
+  },
+  {
+   "id": "以赛亚书",
+   "name": "以赛亚书",
+   "short": "赛",
+   "chapters": 66,
+   "testament": "old"
+  },
+  {
+   "id": "耶利米书",
+   "name": "耶利米书",
+   "short": "耶",
+   "chapters": 52,
+   "testament": "old"
+  },
+  {
+   "id": "耶利米哀歌",
+   "name": "耶利米哀歌",
+   "short": "哀",
+   "chapters": 5,
+   "testament": "old"
+  },
+  {
+   "id": "以西结书",
+   "name": "以西结书",
+   "short": "结",
+   "chapters": 48,
+   "testament": "old"
+  },
+  {
+   "id": "但以理书",
+   "name": "但以理书",
+   "short": "但",
+   "chapters": 12,
+   "testament": "old"
+  },
+  {
+   "id": "何西阿书",
+   "name": "何西阿书",
+   "short": "何",
+   "chapters": 14,
+   "testament": "old"
+  },
+  {
+   "id": "约珥书",
+   "name": "约珥书",
+   "short": "珥",
+   "chapters": 3,
+   "testament": "old"
+  },
+  {
+   "id": "阿摩司书",
+   "name": "阿摩司书",
+   "short": "摩",
+   "chapters": 9,
+   "testament": "old"
+  },
+  {
+   "id": "俄巴底亚书",
+   "name": "俄巴底亚书",
+   "short": "俄",
+   "chapters": 1,
+   "testament": "old"
+  },
+  {
+   "id": "约拿书",
+   "name": "约拿书",
+   "short": "拿",
+   "chapters": 4,
+   "testament": "old"
+  },
+  {
+   "id": "弥迦书",
+   "name": "弥迦书",
+   "short": "弥",
+   "chapters": 7,
+   "testament": "old"
+  },
+  {
+   "id": "那鸿书",
+   "name": "那鸿书",
+   "short": "鸿",
+   "chapters": 3,
+   "testament": "old"
+  },
+  {
+   "id": "哈巴谷书",
+   "name": "哈巴谷书",
+   "short": "哈",
+   "chapters": 3,
+   "testament": "old"
+  },
+  {
+   "id": "西番雅书",
+   "name": "西番雅书",
+   "short": "番",
+   "chapters": 3,
+   "testament": "old"
+  },
+  {
+   "id": "哈该书",
+   "name": "哈该书",
+   "short": "该",
+   "chapters": 2,
+   "testament": "old"
+  },
+  {
+   "id": "撒迦利亚书",
+   "name": "撒迦利亚书",
+   "short": "亚",
+   "chapters": 14,
+   "testament": "old"
+  },
+  {
+   "id": "玛拉基书",
+   "name": "玛拉基书",
+   "short": "玛",
+   "chapters": 4,
+   "testament": "old"
+  },
+  {
+   "id": "马太福音",
+   "name": "马太福音",
+   "short": "太",
+   "chapters": 28,
+   "testament": "new"
+  },
+  {
+   "id": "马可福音",
+   "name": "马可福音",
+   "short": "可",
+   "chapters": 16,
+   "testament": "new"
+  },
+  {
+   "id": "路加福音",
+   "name": "路加福音",
+   "short": "路",
+   "chapters": 24,
+   "testament": "new"
+  },
+  {
+   "id": "约翰福音",
+   "name": "约翰福音",
+   "short": "约",
+   "chapters": 21,
+   "testament": "new"
+  },
+  {
+   "id": "使徒行传",
+   "name": "使徒行传",
+   "short": "徒",
+   "chapters": 28,
+   "testament": "new"
+  },
+  {
+   "id": "罗马书",
+   "name": "罗马书",
+   "short": "罗",
+   "chapters": 16,
+   "testament": "new"
+  },
+  {
+   "id": "哥林多前书",
+   "name": "哥林多前书",
+   "short": "林前",
+   "chapters": 16,
+   "testament": "new"
+  },
+  {
+   "id": "哥林多后书",
+   "name": "哥林多后书",
+   "short": "林后",
+   "chapters": 13,
+   "testament": "new"
+  },
+  {
+   "id": "加拉太书",
+   "name": "加拉太书",
+   "short": "加",
+   "chapters": 6,
+   "testament": "new"
+  },
+  {
+   "id": "以弗所书",
+   "name": "以弗所书",
+   "short": "弗",
+   "chapters": 6,
+   "testament": "new"
+  },
+  {
+   "id": "腓立比书",
+   "name": "腓立比书",
+   "short": "腓",
+   "chapters": 4,
+   "testament": "new"
+  },
+  {
+   "id": "歌罗西书",
+   "name": "歌罗西书",
+   "short": "西",
+   "chapters": 4,
+   "testament": "new"
+  },
+  {
+   "id": "帖撒罗尼迦前书",
+   "name": "帖撒罗尼迦前书",
+   "short": "帖前",
+   "chapters": 5,
+   "testament": "new"
+  },
+  {
+   "id": "帖撒罗尼迦后书",
+   "name": "帖撒罗尼迦后书",
+   "short": "帖后",
+   "chapters": 3,
+   "testament": "new"
+  },
+  {
+   "id": "提摩太前书",
+   "name": "提摩太前书",
+   "short": "提前",
+   "chapters": 6,
+   "testament": "new"
+  },
+  {
+   "id": "提摩太后书",
+   "name": "提摩太后书",
+   "short": "提后",
+   "chapters": 4,
+   "testament": "new"
+  },
+  {
+   "id": "提多书",
+   "name": "提多书",
+   "short": "多",
+   "chapters": 3,
+   "testament": "new"
+  },
+  {
+   "id": "腓利门书",
+   "name": "腓利门书",
+   "short": "门",
+   "chapters": 1,
+   "testament": "new"
+  },
+  {
+   "id": "希伯来书",
+   "name": "希伯来书",
+   "short": "来",
+   "chapters": 13,
+   "testament": "new"
+  },
+  {
+   "id": "雅各书",
+   "name": "雅各书",
+   "short": "雅",
+   "chapters": 5,
+   "testament": "new"
+  },
+  {
+   "id": "彼得前书",
+   "name": "彼得前书",
+   "short": "彼前",
+   "chapters": 5,
+   "testament": "new"
+  },
+  {
+   "id": "彼得后书",
+   "name": "彼得后书",
+   "short": "彼后",
+   "chapters": 3,
+   "testament": "new"
+  },
+  {
+   "id": "约翰壹书",
+   "name": "约翰壹书",
+   "short": "约壹",
+   "chapters": 5,
+   "testament": "new"
+  },
+  {
+   "id": "约翰贰书",
+   "name": "约翰贰书",
+   "short": "约贰",
+   "chapters": 1,
+   "testament": "new"
+  },
+  {
+   "id": "约翰叁书",
+   "name": "约翰叁书",
+   "short": "约叁",
+   "chapters": 1,
+   "testament": "new"
+  },
+  {
+   "id": "犹大书",
+   "name": "犹大书",
+   "short": "犹",
+   "chapters": 1,
+   "testament": "new"
+  },
+  {
+   "id": "启示录",
+   "name": "启示录",
+   "short": "启",
+   "chapters": 22,
+   "testament": "new"
+  }
+ ]
+}

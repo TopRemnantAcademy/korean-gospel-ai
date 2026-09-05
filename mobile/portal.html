@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0C0A08">
+  <title>FLOW · 统一入口</title>
+
+  <!-- 字体：改用系统字体栈（与 index.html 一致），禁止从 fonts.googleapis.com 在线加载
+       （中国大陆/离线环境被墙 → 改为本地系统字体，保证零外部依赖）。
+       Tailwind / Font Awesome CDN 亦移除，改为下方内联等价样式。 -->
+
+  <style>
+    /* ── 颜色与字体栈（原 Tailwind 配置内联）── */
+    :root{
+      --ink:#0C0A08; --panel:#16130F; --panel2:#1B1712;
+      --cream:#EFE9DD; --cream2:#C3B8A6;
+      --emerald:#2E7D56; --emeraldl:#5FAE84; --gold:#C9A24B; --line:#2A241C;
+      --muted:#8A7C66;
+    }
+    html, body { background: #0C0A08; }
+    body {
+      font-family: "Noto Sans SC", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #EFE9DD;
+      min-height: 100dvh;
+      position: relative;
+      overflow-x: hidden;
+    }
+    .serif { font-family: "Noto Serif SC", Georgia, "Songti SC", "SimSun", serif; }
+    .font-sans { font-family: "Noto Sans SC", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .antialiased { -webkit-font-smoothing: antialiased; }
+    /* 布局工具类（替代被移除的 Tailwind CDN） */
+    .max-w-5xl { max-width: 64rem; }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+    .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+    .sm\:px-10 { }
+    @media (min-width:640px){ .sm\:px-10{ padding-left:2.5rem; padding-right:2.5rem; } }
+    .py-8 { padding-top: 2rem; padding-bottom: 2rem; }
+    .sm\:py-12 { }
+    @media (min-width:640px){ .sm\:py-12{ padding-top:3rem; padding-bottom:3rem; } }
+    .mt-12 { margin-top: 3rem; } .mt-14 { margin-top: 3.5rem; }
+    .sm\:mt-16 { } @media (min-width:640px){ .sm\:mt-16{ margin-top:4rem; } }
+    .gap-3 { gap:.75rem; } .gap-4 { gap:1rem; } .gap-5 { gap:1.25rem; } .gap-8 { gap:2rem; }
+    .flex { display:flex; } .items-center{ align-items:center; } .items-start{ align-items:flex-start; }
+    .justify-between{ justify-content:space-between; } .flex-1{ flex:1 1 0%; } .min-w-0{ min-width:0; }
+    .hidden { display:none; } .block{ display:block; }
+    .grid { display:grid; }
+    .md\:grid-cols-12{ } @media (min-width:768px){ .md\:grid-cols-12{ grid-template-columns:repeat(12,minmax(0,1fr)); } }
+    .md\:col-span-4{ } .md\:col-span-5{ } .md\:col-span-7{ } .md\:col-span-8{ }
+    @media (min-width:768px){ .md\:col-span-4{grid-column:span 4/span 4;} .md\:col-span-5{grid-column:span 5/span 5;} .md\:col-span-7{grid-column:span 7/span 7;} .md\:col-span-8{grid-column:span 8/span 8;} }
+    .md\:block{ } @media (min-width:768px){ .md\:block{ display:block; } }
+    .text-center{ text-align:center; }
+    .rounded-2xl{ border-radius:1rem; } .rounded-xl{ border-radius:.75rem; }
+    .border{ border-width:1px; } .border-t{ border-top-width:1px; }
+    .border-line{ border-color:var(--line); }
+    .bg-panel{ background-color:var(--panel); }
+    .shadow-lift{ box-shadow:0 2px 8px rgba(0,0,0,.55),0 18px 44px rgba(0,0,0,.6); }
+    .p-6 { padding:1.5rem; } .pl-4{ padding-left:1rem; } .pt-6{ padding-top:1.5rem; }
+    .text-xl{ font-size:1.25rem; line-height:1.75rem; } .text-lg{ font-size:1.125rem; line-height:1.75rem; }
+    .text-base{ font-size:1rem; line-height:1.5rem; } .text-sm{ font-size:.875rem; line-height:1.25rem; }
+    .text-xs{ font-size:.75rem; line-height:1rem; } .text-4xl{ font-size:2.25rem; line-height:2.5rem; }
+    .sm\:text-5xl{ } @media (min-width:640px){ .sm\:text-5xl{ font-size:3rem; line-height:1.1; } }
+    .font-extrabold{ font-weight:800; } .font-bold{ font-weight:700; } .font-semibold{ font-weight:600; }
+    .font-italic{ font-style:italic; } .not-italic{ font-style:normal; }
+    .italic{ font-style:italic; }
+    .leading-none{ line-height:1; } .leading-relaxed{ line-height:1.625; } .leading-[1.1]{ line-height:1.1; }
+    .uppercase{ text-transform:uppercase; } .tracking-\[.22em\]{ letter-spacing:.22em; }
+    .max-w-md{ max-width:28rem; }
+    .mt-2{ margin-top:.5rem; } .mt-3{ margin-top:.75rem; } .mt-5{ margin-top:1.25rem; }
+    .ml-3{ margin-left:.75rem; } .mb-2{ margin-bottom:.5rem; }
+    .text-cream2{ color:var(--cream2); } .text-cream{ color:var(--cream); }
+    .items-center .w-10{ width:2.5rem; } .h-10{ height:2.5rem; }
+    .w-10,.h-10{ border-radius:.75rem; }
+    .text-lg.leading-none{ line-height:1; }
+    /* 氛围：espresso 基调上的 emerald + gold 光晕，细颗粒噪点 */
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: -2;
+      background:
+        radial-gradient(120% 60% at 12% -10%, rgba(46,125,86,.18), transparent 60%),
+        radial-gradient(90% 50% at 92% 4%, rgba(201,162,75,.12), transparent 55%),
+        #0C0A08;
+    }
+    body::after {
+      content: ''; position: fixed; inset: 0; z-index: -1; opacity: .05; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      mix-blend-mode: overlay;
+    }
+    .serif { font-family: "Noto Serif SC", "Cormorant Garamond", serif; }
+    /* 每个入口卡片左缘的金色细线 */
+    .tile { position: relative; overflow: hidden; }
+    .tile::before {
+      content: ''; position: absolute; left: 0; top: 16px; bottom: 16px; width: 2px;
+      background: linear-gradient(180deg, #C9A24B, #2E7D56); opacity: .55; transition: opacity .25s;
+    }
+    .tile:hover::before { opacity: 1; }
+    .tile:hover { transform: translateY(-3px); box-shadow: 0 2px 8px rgba(0,0,0,.55), 0 18px 44px rgba(0,0,0,.6); }
+    .tile .ic {
+      width: 52px; height: 52px; flex-shrink: 0; border-radius: 14px;
+      display: flex; align-items: center; justify-content: center; font-size: 1.35rem;
+      background: linear-gradient(160deg, rgba(95,174,132,.22), rgba(46,125,86,.12));
+      color: #C9A24B; border: 1px solid rgba(201,162,75,.28);
+    }
+    .reveal { opacity: 0; transform: translateY(14px); animation: rise .6s cubic-bezier(.22,1,.36,1) forwards; }
+    @keyframes rise { to { opacity: 1; transform: none; } }
+    .rule { width: 2px; align-self: stretch; background: linear-gradient(180deg, transparent, #C9A24B, transparent); opacity: .5; }
+  </style>
+</head>
+
+<body class="font-sans antialiased">
+  <div class="max-w-5xl mx-auto px-6 sm:px-10 py-8 sm:py-12">
+
+    <!-- ── 顶栏：品牌（左）── -->
+    <header class="flex items-center justify-between gap-4 reveal" style="animation-delay:.02s">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center"
+             style="background:linear-gradient(160deg,#5FAE84,#2E7D56);box-shadow:0 6px 18px rgba(46,125,86,.35)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M2 12c0-3 2.5-5 6-5 1.5 0 3 .5 4 1.5C13 7 14.5 6 16 6c1 0 2 .5 3 1.5-2 .3-3 1.3-3 2.5 0 .4.1.8.3 1.1C13.5 11 11 12 8 12H2z"/></svg>
+        </div>
+        <div>
+          <p class="serif font-extrabold text-xl leading-none">FLOW</p>
+          <p class="text-[.62rem] tracking-[.22em] font-bold uppercase mt-1" style="color:#C9A24B">GOSPEL</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── Hero（非对称：左侧金色竖线 + 偏左文案）── -->
+    <section class="mt-12 sm:mt-16 grid md:grid-cols-12 gap-8 items-center reveal" style="animation-delay:.08s">
+      <div class="md:col-span-8">
+        <div class="flex gap-5">
+          <div class="rule hidden md:block"></div>
+          <div>
+            <h1 class="serif font-extrabold text-4xl sm:text-5xl leading-[1.1]">
+              <span>神话语与祷告</span><br>
+              <span style="color:#C9A24B">同在之处</span>
+            </h1>
+            <p class="mt-5 text-cream2 text-base sm:text-lg max-w-md leading-relaxed">
+              在一个画面中开启四款属灵工具。
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="md:col-span-4 hidden md:block">
+        <blockquote class="serif italic text-cream2/80 text-lg leading-relaxed border-l-2 pl-4" style="border-color:rgba(201,162,75,.5)">
+          “我对你们所说的话就是灵、就是生命。”
+          <footer class="text-sm not-italic mt-2" style="color:#C9A24B">— 约翰福音 6:63</footer>
+        </blockquote>
+      </div>
+    </section>
+
+    <!-- ── 入口卡片：7/5 + 5/7 错落编辑网格 ── -->
+    <section class="mt-12 grid md:grid-cols-12 gap-5">
+
+      <!-- 聊天（主推，较大） -->
+      <a href="http://127.0.0.1:8501" target="_blank" rel="noopener"
+         class="tile reveal md:col-span-7 rounded-2xl p-6 flex gap-5 items-start bg-panel border border-line shadow-lift"
+         style="animation-delay:.12s">
+        <div class="ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/></svg></div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="serif font-bold text-xl">综合聊天</h3>
+            <span class="text-sm font-semibold" style="color:#C9A24B">打开 →</span>
+          </div>
+          <p class="mt-2 text-cream2 text-sm leading-relaxed">一起默想经文，分享对话。</p>
+          <p class="mt-3 text-xs" style="color:#8A7C66">http://127.0.0.1:8501</p>
+        </div>
+      </a>
+
+      <!-- 管理控制台 -->
+      <a href="http://127.0.0.1:8502" target="_blank" rel="noopener"
+         class="tile reveal md:col-span-5 rounded-2xl p-6 flex gap-5 items-start bg-panel border border-line shadow-lift"
+         style="animation-delay:.16s">
+        <div class="ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M4 8h10V6H4v2zm0 4h16v-2H4v2zm0 4h10v-2H4v2zM16 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg></div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="serif font-bold text-xl">管理控制台</h3>
+            <span class="text-sm font-semibold" style="color:#C9A24B">打开 →</span>
+          </div>
+          <p class="mt-2 text-cream2 text-sm leading-relaxed">管理内容、用户与系统。</p>
+        </div>
+      </a>
+
+      <!-- API 文档 -->
+      <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener"
+         class="tile reveal md:col-span-5 rounded-2xl p-6 flex gap-5 items-start bg-panel border border-line shadow-lift"
+         style="animation-delay:.2s">
+        <div class="ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M12 6c-1.6-1.3-3.7-2-6-2H3v14h3c2.3 0 4.4.7 6 2 1.6-1.3 3.7-2 6-2h3V4h-3c-2.3 0-4.4.7-6 2zm0 0v14"/></svg></div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="serif font-bold text-xl">API 文档</h3>
+            <span class="text-sm font-semibold" style="color:#C9A24B">打开 →</span>
+          </div>
+          <p class="mt-2 text-cream2 text-sm leading-relaxed">基于 Swagger 的后端接口参考。</p>
+        </div>
+      </a>
+
+      <!-- 移动应用 -->
+      <a href="http://127.0.0.1:4174" target="_blank" rel="noopener"
+         class="tile reveal md:col-span-7 rounded-2xl p-6 flex gap-5 items-start bg-panel border border-line shadow-lift"
+         style="animation-delay:.24s">
+        <div class="ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 14h10V4H7v12zm5 3h0v.01z"/></svg></div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="serif font-bold text-xl">移动应用</h3>
+            <span class="text-sm font-semibold" style="color:#C9A24B">打开 →</span>
+          </div>
+          <p class="mt-2 text-cream2 text-sm leading-relaxed">PWA · 安卓讲道·诗歌·默想。</p>
+          <p class="mt-3 text-xs" style="color:#8A7C66">http://127.0.0.1:4174</p>
+        </div>
+      </a>
+    </section>
+
+    <!-- ── 页脚 ── -->
+    <footer class="mt-14 pt-6 border-t text-center text-xs" style="border-color:#2A241C;color:#8A7C66">
+      本地开发环境的统一入口
+    </footer>
+  </div>
+</body>
+</html>
