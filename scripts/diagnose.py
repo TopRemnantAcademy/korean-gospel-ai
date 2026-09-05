@@ -37,7 +37,7 @@ def check(name, fn):
 
 def main():
     out("=" * 70)
-    out("  Korean Gospel RAG - DIAGNOSE")
+    out("   RAG - DIAGNOSE")
     out("=" * 70)
 
     out(f"\nPython     : {sys.version.split()[0]}  ({sys.executable})")

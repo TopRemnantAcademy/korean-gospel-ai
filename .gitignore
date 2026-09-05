@@ -106,3 +106,26 @@ scripts_bugtest_e2e.py
 run_logs
 # CodeBuddy/WorkBuddy 툴링 락 파일 (프로젝트 소스 아님)
 skills-lock.json
+
+# ===== 툴링/런타임/산출물 (커밋 금지) =====
+# 모델 가중치 (2.2G+, 바이너리 — 절대 커밋 금지)
+.models/
+# 에이전트/IDE 툴링 상태 디렉터리
+.agents/
+.claude/
+.codebuddy/
+.gstack/
+.zcode/
+.playwright-mcp/
+.server_logs/
+.workbuddy/
+# 런타임 로그 전체 (개별 *.log 패턴만으로는 .txt/디렉터리 누수)
+logs/
+# 디버그 스크린샷/오버플로우 캡처
+_overflow_shots/
+# 릴리스 산출물 (APK/AAB/메타 — 바이너리)
+releases/
+# 부하 테스트 결과 아티팩트
+load_test_result*.json
+# 백업 파일
+*.bak

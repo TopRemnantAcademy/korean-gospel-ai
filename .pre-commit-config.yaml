@@ -1,0 +1,26 @@
+# Pre-commit hooks — 在 push 之前本地拦截低质量代码
+# 安装: pip install pre-commit && pre-commit install
+# 一次性全量修复: pre-commit run --all-files
+#
+# 这是"第一道门禁"，比 CI 反馈更快（写代码时就挡住）。
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(backend/app|admin/lib|tests)/
+
+      - id: ruff-format
+        files: ^(backend/app|admin/lib|tests)/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=2000"]
+      - id: check-merge-conflict

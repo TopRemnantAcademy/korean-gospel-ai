@@ -1,0 +1,30 @@
+# =========================================================
+# Lighthouse 부팅 자동기동 유닛 — "서버 재부팅 후 연결 끊김" 방지
+# 설치:
+#   sudo cp deploy/gospel.service /etc/systemd/system/gospel.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable gospel.service
+#   sudo systemctl start gospel.service
+# 참고: WorkingDirectory 는 이 repo 를 클론한 경로로 수정.
+#       (예: /opt/korean-gospel-ai 또는 ~/korean-gospel-ai)
+# docker compose 의 restart:unless-stopped 는 도커 데몬 생존 중에만 유효.
+# 이 유닛은 호스트 자체가 재부팅돼도 스택을 자동으로 띄움.
+# =========================================================
+
+[Unit]
+Description=Korean Gospel AI stack (Docker Compose)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/korean-gospel-ai
+# ⚠️ --env-file 필수: 누락 시 backend 가 환경변수 없이 기동되어 실패.
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.production down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

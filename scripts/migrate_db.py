@@ -37,12 +37,29 @@ def _sqlite_type(col_type) -> str:
     return "TEXT"
 
 
+def _default_literal(col_type) -> str:
+    """NOT NULL 컬럼 추가 시 기존 행용 기본값(타입별 적절한 리터럴).
+
+    기존: 항상 DEFAULT '' → 숫자/불린 컬럼에 빈 문자열이 들어가 데이터 오염.
+    """
+    t = str(col_type).upper()
+    if "INT" in t or "BOOL" in t:
+        return "0"
+    if "FLOAT" in t or "REAL" in t or "NUMERIC" in t:
+        return "0.0"
+    if "DATE" in t or "TIME" in t:
+        return "'1970-01-01 00:00:00'"
+    return "''"  # TEXT / VARCHAR / JSON
+
+
+
 def run():
     insp = inspect(engine)
     existing_tables = set(insp.get_table_names())
 
     added_tables = []
     added_cols   = []
+    added_idx    = []
     errors       = []
 
     with engine.connect() as conn:
@@ -61,8 +78,12 @@ def run():
             for col in table.columns:
                 if col.name not in existing_cols:
                     dtype = _sqlite_type(col.type)
-                    nullable = "NULL" if col.nullable else "NOT NULL DEFAULT ''"
-                    sql = f'ALTER TABLE "{tname}" ADD COLUMN "{col.name}" {dtype}'
+                    nullable = (
+                        "NULL"
+                        if col.nullable
+                        else f"NOT NULL DEFAULT {_default_literal(col.type)}"
+                    )
+                    sql = f'ALTER TABLE "{tname}" ADD COLUMN "{col.name}" {dtype} {nullable}'
                     try:
                         conn.execute(text(sql))
                         conn.commit()
@@ -71,6 +92,30 @@ def run():
                     except Exception as e:
                         errors.append(f"{tname}.{col.name}: {e}")
                         print(f"  [SKIP] {tname}.{col.name}: {e}")
+
+        # 기존 테이블에 새로 추가된 인덱스 생성 (index=True 컬럼 등)
+        for table in Base.metadata.sorted_tables:
+            tname = table.name
+            if tname not in existing_tables:
+                continue
+            existing_idx = {i["name"] for i in insp.get_indexes(tname)}
+            for idx in table.indexes:
+                if idx.name in existing_idx:
+                    continue
+                cols = ", ".join(f'"{c.name}"' for c in idx.columns)
+                unique = "UNIQUE " if idx.unique else ""
+                sql = (
+                    f'CREATE {unique}INDEX IF NOT EXISTS "{idx.name}" '
+                    f'ON "{tname}" ({cols})'
+                )
+                try:
+                    conn.execute(text(sql))
+                    conn.commit()
+                    added_idx.append(idx.name)
+                    print(f"  [ADD IDX] {idx.name}")
+                except Exception as e:
+                    errors.append(f"{idx.name}: {e}")
+                    print(f"  [SKIP IDX] {idx.name}: {e}")
 
     print("\n=== 결과 ===")
     print(f"신규 테이블: {len(added_tables)}개  {added_tables}")

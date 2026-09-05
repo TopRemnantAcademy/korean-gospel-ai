@@ -12,7 +12,6 @@ ingress:
   # 사용자 UI (User)
   - hostname: gospel-ai.trycloudflare.com
     service: http://localhost:8502
-    # 공개 접근, 하지만 user/app.py 에서 베타 초대 코드 검증
 
   # 관리자 UI (Admin)
   - hostname: admin-gospel-ai.trycloudflare.com

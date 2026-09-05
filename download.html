@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>下载 FLOW AI App</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      background: #0f2a24; color: #eaf3ee; line-height: 1.6;
+      min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+      padding: 48px 20px;
+    }
+    .card {
+      background: #16392f; border-radius: 20px; padding: 36px 28px;
+      max-width: 460px; width: 100%; box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    .logo { font-size: 34px; font-weight: 800; text-align: center; margin-bottom: 6px; }
+    .sub { text-align: center; color: #9fc4b4; margin-bottom: 28px; font-size: 14px; }
+    .btn {
+      display: block; width: 100%; text-align: center; text-decoration: none;
+      background: #2fae7e; color: #06231a; font-weight: 700; font-size: 17px;
+      padding: 16px; border-radius: 14px; margin-bottom: 14px; transition: .2s;
+    }
+    .btn:active { transform: scale(.98); }
+    .btn.alt { background: #1c4f3e; color: #cfe9dd; font-weight: 600; font-size: 15px; }
+    .note {
+      background: #0f2a24; border-radius: 12px; padding: 16px; margin-top: 24px;
+      font-size: 13px; color: #bcd9cd;
+    }
+    .note h3 { font-size: 14px; color: #eaf3ee; margin-bottom: 8px; }
+    .note ol { padding-left: 18px; }
+    .note li { margin-bottom: 6px; }
+    .ver { text-align: center; font-size: 12px; color: #6f9688; margin-top: 20px; }
+    code { background: #0f2a24; padding: 2px 6px; border-radius: 5px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">FLOW AI</div>
+    <div class="sub">安卓 App 下载 · 无需 Google Play</div>
+
+    <a class="btn" href="./releases/global/flow-ai.apk" download>⬇ 下载安卓版 APK</a>
+    <a class="btn alt" href="./releases/global/flow-ai.apk" download>⬇ 备用下载</a>
+
+    <div class="note">
+      <h3>安装步骤（首次）</h3>
+      <ol>
+        <li>点击上方按钮下载 APK。</li>
+        <li>下载完成后，系统会提示「禁止安装未知来源应用」。</li>
+        <li>点击 <b>「设置」</b> → 开启 <b>「允许来自此来源」</b>（即本浏览器/文件管理器的安装权限）。</li>
+        <li>返回并点击 <b>「安装」</b> 即可。</li>
+        <li>之后再次安装更新版本时，无需重复授权。</li>
+      </ol>
+      <p style="margin-top:10px;">本 App 不依赖 Google 服务，可在中国大陆及香港的安卓手机上正常运行。如遇下载缓慢，请使用香港/海外网络或稍后重试。</p>
+    </div>
+
+    <div class="ver">FLOW AI · 无需 Google 服务 · 支持微信 / 支付宝</div>
+  </div>
+</body>
+</html>

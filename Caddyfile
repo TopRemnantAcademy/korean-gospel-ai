@@ -1,0 +1,74 @@
+# =========================================================
+# Caddy 리버스 프록시 — Lighthouse 운영 (산업 표준 최적화)
+# 역할:
+#   - UI(8501) 만 공개, backend(8000)/qdrant(6333) 는 내부망 전용 (미노출)
+#   - gzip + zstd 압축, 보안 헤더, 스트리밍 친화 타임아웃
+#   - Streamlit WebSocket 을 위한 Host 헤더 투명 전달
+# 사용자 접속: https://<서버IP>:8501  (자체서명 경고 1회 수락)
+# =========================================================
+
+{
+    # 도메인이 없으므로 ACME(Let's Encrypt) 자동발급 OFF
+    auto_https off
+    # 시크릿/인증서 권한 엄격화
+    admin off
+    # 글로벌 타임아웃: LLM 스트리밍이 길어질 수 있으므로 넉넉히
+    servers {
+        trusted_proxies static 127.0.0.1
+        timeouts {
+            read_body   30s
+            read_header 30s
+            write       5m
+            idle        2m
+        }
+    }
+}
+
+# ── 현재: IP + 자체서명 TLS ──
+:8501 {
+    tls self_signed
+
+    # 보안 헤더 (운영 도메인 확보 시 strict-transport-security 추가)
+    header {
+        -Server
+        -X-Powered-By
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Cross-Origin-Opener-Policy "same-origin"
+        Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https:; frame-ancestors 'self'"
+    }
+
+    # 압축 (gzip + zstd)
+    encode zstd gzip
+
+    # Streamlit 는 websocket + long-poll 을 쓰므로 긴 타임아웃
+    reverse_proxy ui:8501 {
+        # Host 헤더 그대로 전달 → Streamlit 웹소켓 호스트 문제 방지
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        # upstream(Streamlit) 이 느릴 수 있으므로 여유 있게
+        transport http {
+            read_timeout    5m
+            write_timeout   5m
+            idle_timeout    2m
+        }
+    }
+}
+
+# =========================================================
+# 도메인 확보 후 아래 블록으로 교체 (주석 해제 + 위 :8501 블록 삭제):
+#   gospel.example.com {
+#       encode zstd gzip
+#       header {
+#           Strict-Transport-Security "max-age=31536000; includeSubDomains"
+#           X-Content-Type-Options "nosniff"
+#           X-Frame-Options "SAMEORIGIN"
+#           Referrer-Policy "strict-origin-when-cross-origin"
+#       }
+#       reverse_proxy ui:8501
+#   }
+# → Caddy 가 Let's Encrypt 인증서를 자동 발급/갱신하고 HTTPS 를 맟춤.
+# =========================================================

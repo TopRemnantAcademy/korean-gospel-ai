@@ -1,0 +1,64 @@
+# =========================================================
+# 로컬 전용 Docker Compose (클라우드 의존성 0)
+# — Qdrant 컨테이너 없음(backend 가 embedded 로컬 사용)
+# — Caddy 없음(UI 를 8501 로 직접 노출, IP 접속)
+# 사용:
+#   cp .env.local.template .env.local
+#   docker compose -f docker-compose.local.yml --env-file .env.local up -d --build
+# =========================================================
+
+version: '3.8'
+
+x-restart: &restart-policy
+  restart: unless-stopped
+
+services:
+  # ---- Backend (embedded Qdrant, 단일 프로세스) ----
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: korean-gospel-backend-local
+    <<: *restart-policy
+    env_file:
+      - .env.local
+    volumes:
+      - ./data:/app/data
+      - ./.qdrant_local:/app/.qdrant_local
+      - ./gospel.db:/app/gospel.db
+      - ./logs:/app/logs
+      - ./models:/app/.models
+    ports:
+      - "8000:8000"
+    mem_limit: 4g
+    mem_reservation: 2g
+    cpus: 2.0
+    # healthcheck 는 host 에서 curl http://localhost:8000/health 로 충분 (ports 노출됨)
+
+  # ---- 통합 UI (Streamlit, 직접 노출) ----
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: korean-gospel-ui-local
+    <<: *restart-policy
+    env_file:
+      - .env.local
+    environment:
+      - API_BASE=http://backend:8000
+      - STREAMLIT_SERVER_MAX_MESSAGE_SIZE=104857600
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - STREAMLIT_SERVER_ENABLE_HEALTH_LISTENER=true
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    mem_limit: 2g
+    mem_reservation: 1g
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8501/_stcore/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

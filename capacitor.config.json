@@ -1,0 +1,34 @@
+{
+  "appId": "com.gospelai.app",
+  "appName": "FLOW AI",
+  "webDir": "mobile/dist/android",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "hostname": "app.gospelai.local",
+    "url": null
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#12362f",
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#12362f",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#0C0A08"
+    },
+    "Keyboard": {
+      "resize": "body",
+      "style": "DARK",
+      "resizeOnFullScreen": true
+    }
+  }
+}

@@ -10,7 +10,6 @@
 
 전제 조건:
   - Alembic upgrade head 가 PostgreSQL 에 이미 적용되어 있어야 함
-    (scripts/upgrade/tier_0_to_0_5.py Tier15To2._migrate_schema 참조)
   - pip install psycopg2-binary sqlalchemy
 """
 from __future__ import annotations
