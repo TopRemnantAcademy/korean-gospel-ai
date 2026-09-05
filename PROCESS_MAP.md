@@ -10,16 +10,16 @@
 ┌──────────────────────────────────────────────────────────────────────┐
 │                          외부 진입                                    │
 │                                                                      │
-│  운영자  ─►  Admin UI (8501)  ─┐         ┌─►  User UI (8502)  ◄─ 사용자│
-│                                 │         │                          │
-└─────────────────────────────────┼─────────┼──────────────────────────┘
-                                  │  HTTP   │
-                  ┌───────────────▼─────────▼────────────────┐
-                  │   FastAPI Backend (uvicorn, 8000)        │
+│  운영자  ─►  Admin Hub UI (8502)  ─┐   ┌─►  User 통합앱 UI (8501)  ◄─ 사용자│
+│                                     │   │                            │
+└─────────────────────────────────────┼───┼────────────────────────────┘
+                                      │ HTTP│
+                  ┌───────────────────▼─────▼─────────────────┐
+                  │   FastAPI Backend (uvicorn, 8000)         │
                   │                                          │
                   │  /chat  /chat/stream  /retrieval         │
                   │  /documents/*  /memory/*  /prompts/*     │
-                  │  /eval/*  /admin/*                       │
+                  │  /admin/*  /mobile/*                     │
                   └──┬───┬───┬───┬───┬───┬───┬───┬────┬─────┘
                      │   │   │   │   │   │   │   │    │
        ┌─────────────┘   │   │   │   │   │   │   │    └─────────────┐
@@ -31,11 +31,11 @@
    └───────┘  └─────┬─────┘  │  └───┬───┘  │  └─────────┘    └────┬────┘
                     │        │      │      │                      │
               ┌─────▼─────┐  │  ┌───▼────┐ │  ┌──────────┐        │
-              │ Embedder  │  │  │Gemini  │ │  │ Safety   │        │
-              │ (KURE-v1) │  │  │Deepseek│ │  │ Service  │        │
-              │           │  │  │OpenAI  │ │  │ (HARD)   │        │
-              │ Reranker  │  │  │Claude  │ │  └──────────┘        │
-              │ (bge)     │  │  │Ollama  │ │                      │
+              │ Embedder  │  │  │Tencent │ │  │ Safety   │        │
+              │ (KURE-v1) │  │  │NVIDIA  │ │  │ Service  │        │
+              │           │  │  │Gemini  │ │  │ (HARD)   │        │
+              │ Reranker  │  │  │기타     │ │  └──────────┘        │
+              │ (bge/None)│  │  │폴백     │ │                      │
               └───────────┘  │  └────────┘ │                      │
                              │             │                      │
                   ┌──────────▼─────────────▼──────────────────────▼──┐
@@ -76,10 +76,10 @@
 [3] classify_user_signal(query) + merge_auto_signal(sub_id, signal)
     │  └─ LLM router가 사용자 신호 분류 + 프로필 자동 갱신
     ▼
-[4] HybridRetriever.retrieve(query, profile=profile)
+[4] search_v4.AdvancedSearchEngine.search(query, profile=profile)
     │  ├─ dense (KURE-v1) → Qdrant
     │  ├─ sparse (BM42)   → Qdrant   (server 모드만)
-    │  └─ RRF 융합 → bge-reranker → top-N (profile 기반 랭킹 조정)
+    │  └─ RRF 융합 → (옵션 bge-reranker) → top-N (profile 기반 랭킹 조정)
     ▼
 [5] memory_service.build_context_for_llm(sub_id, 3)
     │  └─ DB의 같은 사용자 최근 3개 Q/A를 messages 앞에 prepend
@@ -94,16 +94,17 @@
 [7] chat_with_fallback(messages, system, ...)
     │  ├─ Try: 사용자 지정 provider (예: gemini)
     │  ├─ Catch retryable (429/503/timeout/quota...)
-    │  └─ 다음 provider: deepseek → openai → claude → ollama
+    │  └─ 운영 폴백 체인: tencent → nvidia → gemini (LLM_FALLBACK_CHAIN 환경변수 정의, 미정의 시 기본 gemini)
+    │  └─ 추가 폴백 후보: openai / claude / ollama / deepseek (키 설정 시)
     ▼
 [8] 아첨금지 4중 방어  ← EPIC G-4/G-4.5/G-4.6 (2026-05-26)
     │  ├─ Layer A: flattery_filter.check_flattery(text, target_lang) — 정규식 사전 필터
     │  ├─ Layer B: judge_output(question, answer, target_lang) — LLM Judge 5개 FlatteryFlags
     │  ├─ Layer C: regen.regenerate_strict() — 위반 시 STRICT 모드 1회 재호출 (fail-open)
-    │  └─ Layer D: data/eval/flattery_guard.jsonl 회귀 (eval_service.run_flattery_guard_regression)
+    │  └─ Layer D: data/eval/flattery_guard.jsonl (회귀 데이터 — eval API 제거됨, 재도입 예정)
     ▼
 [9] safety_service.apply(query, answer)
-    │  ├─ 자살/자해 키워드 → 1588-9191 자동 첨부
+    │  ├─ 자살/자해 키워드 → 1393 / 1577-0199 자동 첨부
     │  ├─ 중독/약물 키워드 → 1577-0199 + 의료 권유 자동 첨부
     │  └─ "구원받지 못합니다" 같은 정죄 표현 → BLOCK
     ▼
@@ -163,16 +164,14 @@ ChatResponse(answer, sources, policy, debug_info, interaction_id, ...)
 | **memory API** | `api/memory.py` | Q/A 조회·삭제·피드백 | 대화기록 페이지 |
 | **prompts API** | `api/prompts.py` | 시스템 프롬프트 편집 | AI 어조 |
 | **admin API** | `api/admin.py` | collections/taxonomy/usage/health | Hub 페이지 |
-| **admin agent** | `api/admin_agent.py`| 자연어 명령 해석 및 백엔드 툴 제어 | AI 관제 챗봇 |
 | **subscriber API** | `api/subscriber.py` | 프로필 CRUD 및 Admin 관제 | 사람 페이지 및 맞춤형 챗 |
-| **eval API** | `api/eval.py` | A/B 비교 + regression | Status 페이지 평가 |
-| **retrieval** | `services/retriever.py` | hybrid dense+sparse+rerank | 답변 정확도 |
+| **retrieval** | `services/search_v4.py` (`AdvancedSearchEngine`) + `services/retriever.py` (`HybridRetriever`) | chat 파이프라인은 search_v4 사용, hybrid dense+sparse(RRF)+rerank | 답변 정확도 |
 | **vector store** | `services/vector_store.py` | Qdrant local/server/memory | 검색 인덱스 |
 | **embedding** | `services/embedding/*` | KURE-v1 / bge-m3 / e5 | 검색 품질 |
 | **reranker** | `services/reranker.py` | bge-reranker-v2-m3 | 상위 결과 순위 |
 | **chunker** | `services/chunker.py` | kss 한국어 문장 분리 | 청크 크기/품질 |
 | **LLM 추상** | `services/llm/base.py` | BaseLLM, Message, LLMResponse | 모든 provider 공통 |
-| **LLM provider** | `services/llm/{gemini,openai,claude,ollama,deepseek}.py` | 각 API 호출 | 답변 품질·비용 |
+| **LLM provider** | `services/llm/{gemini,openai,claude,ollama,deepseek,tencent,nvidia}.py` | 각 API 호출 | 답변 품질·비용 |
 | **LLM fallback** | `services/llm/fallback.py` | chain 시도 (rate limit 등) | 안정성 |
 | **LLM factory** | `services/llm/factory.py` | name → 인스턴스 | provider 선택 |
 | **policy** | `services/policy.py` | 입력 룰북 + LLM judge (FlatteryFlags 5종) | 답변 검열 |
@@ -188,7 +187,7 @@ ChatResponse(answer, sources, policy, debug_info, interaction_id, ...)
 | **llm router** | `services/llm/router.py` | 다중 LLM 협력 및 신호 분류 | chat 파이프라인 |
 | **prompt** | `services/prompt_service.py` | DB 프롬프트 활성/저장/이력 | 운영자 톤 편집 |
 | **dedup** | `services/dedup_service.py` | hash + 제목 + 본문 유사 감지 | Upload 경고 |
-| **eval** | `services/eval_service.py` | 평가셋 회귀 실행 | 품질 회귀 |
+| **addiction_care** | `services/addiction_care.py` | 중독·위기 감지 + 프롬프트 애드온 | 중독 상담 품질 |
 | **source** | `services/source_service.py` | L1 immutable artifact 생성 | 업로드 |
 | **extraction** | `services/extraction_service.py` | PDF/DOCX/TXT 추출 + 노이즈 제거 + 품질 점수 | 본문 보존 |
 | **document** | `services/document_service.py` | L2 lifecycle 상태 머신 | 운영 워크플로우 |
@@ -213,10 +212,9 @@ ChatResponse(answer, sources, policy, debug_info, interaction_id, ...)
 | Library | `/documents`, `/documents/{id}`, `/documents/{id}/versions/...`, `/documents/bulk-action` | document, publish, audit |
 | Upload | `/documents/upload` | source, extraction, dedup, document |
 | Search | `/chat` | retriever, llm.fallback, policy, safety, memory |
-| Status | `/admin/collections`, `/eval/regression` | vector_store, eval |
+| Status | `/admin/collections` | vector_store |
 | 대화기록 | `/memory/list`, `/memory/stats`, `/memory/{id}`, `/memory/{id}/feedback` | memory |
 | 사람 (관제탑)| `/admin/subscribers/list`, `/admin/subscribers/{id}`, `/admin/subscribers/categories` | subscriber |
-| AI 관제 (Agent)| `/admin/agent/chat` | admin_agent |
 | 프롬프트 | `/prompts/current`, `/prompts/history`, `/prompts/reset` | prompt |
 | 분류관리 | `/admin/taxonomy` | document, version |
 | User UI (8502) | `/chat/stream` (실패 시 `/chat` 폴백) | retriever, llm.fallback, safety |
@@ -229,7 +227,7 @@ ChatResponse(answer, sources, policy, debug_info, interaction_id, ...)
 사용자 입력 "죄란 무엇인가요?"
     │
     ▼
-ChatRequest(query, history, user_id="self", debug=false)
+ChatRequest(query, history, sub_id=None, debug=false)
     │
     ▼
 chat.py
@@ -244,7 +242,7 @@ chat.py
     │   └─► signal = {"category": ..., "confidence": ...}
     │   └─► merge_auto_signal("self", signal) → profile 갱신
     │
-    ├─► retriever.retrieve("죄란 무엇인가요?", profile=profile)
+    ├─► search_v4.AdvancedSearchEngine.search("죄란 무엇인가요?", profile=profile)
     │   ├─► embedder.embed_query → [0.13, -0.05, ..., 0.21] (1024 dims)
     │   ├─► qdrant.search_dense(vec, top_k=20)
     │   ├─► (server) qdrant.search_sparse("죄란 무엇인가요?", top_k=20)
@@ -264,7 +262,7 @@ chat.py
     ├─► chat_with_fallback(messages, system=...)
     │   ├─► gen = trace.generation(name="answer", model="auto", input=user_prompt)
     │   ├─► try gemini.chat() → response
-    │   ├─► (실패 시) deepseek → openai → claude → ollama
+    │   ├─► (운영 폴백) tencent → nvidia → gemini (미정의 시 gemini 단일)
     │   └─► gen.update(model=llm.model_name) + gen.end(output=resp.text, usage=...)
     │
     ├─► policy.judge_output(question, answer)
@@ -293,7 +291,7 @@ chat.py
 | Google AI API (Gemini) | 질문 + 검색된 청크 텍스트 | `.env`에서 GOOGLE_API_KEY 비움 |
 | HuggingFace (KURE/bge 모델) | 첫 1회 모델 파일 다운로드 | 캐시 후 통신 없음 |
 | Langfuse cloud | trace/generation 메타 | `LANGFUSE_ENABLED=false` |
-| (옵션) OpenAI / Claude / Deepseek | fallback 시 동일 텍스트 | 해당 키 비움 |
+| (옵션) OpenAI / Claude / Deepseek / Tencent / NVIDIA | fallback 시 동일 텍스트 | 해당 키 비움 |
 | 그 외 | **없음** (Qdrant local, SQLite local, 모든 데이터 PC 안에만) | - |
 
 ---
@@ -305,11 +303,11 @@ backend/app/
   main.py            FastAPI 진입
   config.py          환경변수
   db.py              SQLAlchemy
-  api/{chat,retrieval,documents,memory,prompts,eval,admin}.py
+  api/{chat,retrieval,documents,memory,prompts,admin,mobile,content_admin}.py
   services/{retriever,vector_store,chunker,reranker,policy,safety,memory,prompt,
             dedup,eval,source,extraction,document,publish,audit,tracing}.py
   services/{classifier,clarifier,spiritual_correction,flattery_filter,regen}.py  ← EPIC G
-  services/llm/{base,gemini,openai,claude,ollama,deepseek,factory,fallback,router}.py
+  services/llm/{base,gemini,openai,claude,ollama,deepseek,tencent,nvidia,factory,fallback,router}.py
   services/embedding/{base,kure,bge,e5,factory}.py
   models/{orm,schemas}.py
   prompts/{system,classifier,clarifier,policy_judge}.py  ← G-1/G-2/G-4 프롬프트 분리
@@ -320,6 +318,6 @@ admin/
 user/
   app.py             단순 채팅 UI (streaming + fallback)
 scripts/
-  {init_db,diagnose,ab_test,backup,restore}.py
+  {index_sermons,run_benchmark,monitor_cache,backup,restore}.py
 data/{documents,uploads,eval}/
 ```

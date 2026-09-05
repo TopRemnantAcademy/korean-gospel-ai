@@ -1,5 +1,5 @@
 # =========================================================
-# Korean Gospel AI - Monitoring Setup Guide
+# - Monitoring Setup Guide
 # =========================================================
 # This guide explains how to setup monitoring with Langfuse
 # =========================================================
@@ -174,7 +174,7 @@ def my_function():
 if trace:
     trace.event(name="user_feedback", output={
         "interaction_id": interaction.id,
-        "feedback": feedback,  # 👍 or 👎
+        "feedback": feedback, # 👍 or 👎
         "comment": comment,
     })
 ```
@@ -186,7 +186,7 @@ if trace:
 ### Create Langfuse Dashboard
 
 1. Go to **Langfuse → Dashboards**
-2. Create dashboard: "Korean Gospel AI - Production"
+2. Create dashboard: " - Production"
 3. Add widgets:
 
 #### Widget 1: Daily Token Usage
@@ -270,7 +270,7 @@ Chart: Table
 - *Example*: 1000 questions/day × 500 tokens = ~$0.04/day
 
 **DeepSeek V4 Flash**:
-- Input: $0.014 / 1M tokens  
+- Input: $0.014 / 1M tokens
 - Output: $0.028 / 1M tokens
 - *Example*: 1000 questions/day × 500 tokens = ~$0.008/day
 

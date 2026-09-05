@@ -1,4 +1,4 @@
-# ✝️ 한국어 복음 AI — 프로젝트 비전 / 원칙
+# ✝️ 한국어 — 프로젝트 비전 / 원칙
 
 > 본 프로젝트에 *코드를 쓰거나 수정하는 모든 작업자*는 이 문서를 반드시 먼저 읽으십시오.
 
@@ -36,7 +36,7 @@
 
 ```
 사용자 발화 ─→ 표면 진단 ─→ 창세기 3장 뿌리 진단 ─→ 복음의 3중 회복 적용 ─→ 응답
-              (관찰 가능한 패턴)  (3축: 관계·속박·신분)    (3축: 화목·자유·양자)
+              (관찰 가능한 패턴) (3축: 관계·속박·신분) (3축: 화목·자유·양자)
 ```
 
 **모든 chat 응답은 이 사슬을 *암묵적* 으로 따릅니다** (강요 없이 자연스럽게).
@@ -115,7 +115,8 @@
 | 청킹 | **kss** (한국어 문장 분리) | 한국어 친화 |
 | Web 백엔드 | **FastAPI** + uvicorn | 표준 |
 | Admin UI | **Streamlit** + multi-page | 1인 운영에 적합 |
-| User UI | **Streamlit** (포트 8502, 분리) | 단순 채팅 |
+| User 통합앱 UI | **Streamlit** (포트 8501, `app.py`) | 채팅·성경검색·마이페이지·결제 |
+| Admin Hub UI | **Streamlit** (포트 8502, `admin/app.py`) | 대시보드·회원·공지·통계·봇탐지 |
 | DB | **SQLite** (.gospel.db) | 1인 운영, 가벼움 (나중에 Postgres) |
 | 추적 | **Langfuse** (cloud, 옵션) | prompt/response 자동 기록 |
 
@@ -126,7 +127,7 @@
 ```
 source_artifact ─┐
                  ├─→ document ─→ document_version ─→ index_snapshot
-                 │       (논리)        (lifecycle)        (Qdrant 동기)
+                 │ (논리) (lifecycle) (Qdrant 동기)
                  │
                  ├─→ duplicate_link (자료 간 관계)
                  │

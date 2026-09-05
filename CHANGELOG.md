@@ -1,6 +1,39 @@
-# CHANGELOG - 한국어 복음 AI
+# CHANGELOG - 한국어
 
 > 모든 AI Agent의 작업 기록
+
+---
+
+## [2026-08-02] - Agent: CodeBuddy — 검색 쿼리 확장(async) 활성화 + 구원 회귀 테스트 보강
+
+### 🔍 검색 주检索链路 쿼리 확장(async) 활성화 (부족 A 해결)
+- `search_optimizer.py`: `analyze_query_async()` / `_expand_query_async()` **신규** — retriever 비동기
+  컨텍스트에서 `analyze_query`(동기) 가 '실행 중 event loop → LLM 확장 무시' 로 영구 비활성화했던
+  문제를, 동기 버전과 동일 로직을 `await` 로 직접 호출하도록 재구현. `_parse_expansion()` 공용 헬퍼
+  분리(마크다운 펜스 제거/중복·원본 제외/상한 `_EXPANSION_MAX`).
+- `retriever.py`: `retrieve()` Stage 0 쿼리 분석을 `analyze_query()` → `await analyze_query_async()` 로 교체.
+  확장 쿼리가 실제 다중 검색 경로에 주입됨(통합 테스트 `test_retriever_expansion.py` 로 검증).
+- `config.py`: `search_expand_enabled` (bool, 기본 `False`) 신규 — LLM 확장은 명시적 활성화 시에만
+  주检索链路에 주입. 단기 배포 영향 차단용 안전 스위치.
+
+### 🧪 구원(salvation) 회귀 데이터 소비 + 자동 검증 (부족 B 해결)
+- `tests/test_salvation_regression.py` **신규** (LLM 불필요 3종 + best-effort 1종):
+  - `seed_salvation_regression.py` 가 기록한 `eval_question(category='salvation')` 14건을 직접 소비 →
+    seed 데이터가 '잠자는 데이터'로 남지 않도록 자가 검증.
+  - 데이터 무결성(14건 존재 + `expected_doc_ids` 의 `signal:/stage:/pastor:` 인코딩 검증, 항상 실행).
+  - detector 회귀(키 있으면 `detect_salvation_signal` 출력과 seed 기대값 일치 단언, 무 키 시 skip).
+- `scripts/seed_salvation_regression.py`: 3건 표标注를 detector 실측 출력에 정렬
+  (`confessing→testifying`, `seeking→testifying`[요3:16 인지], `doubting→resisting`[망설임]) —
+  2026-08-02 detector 실측 기준, 데이터-모델 자가 일관성 확보.
+
+### 📐 단위/통합 테스트 추가
+- `tests/test_search_optimizer_expand.py` **신규**: `_parse_expansion`(5종) + `_expand_query_async`
+  (정상/타임아웃 흡수/예외 흡수 fail-open) + `analyze_query_async`(스위치 on/off 동작).
+- `tests/test_retriever_expansion.py` **신규**: 확장 쿼리 다중 경로 주입 검증(Qdrant/임베더 전체 모킹, CI 격리).
+
+### 📄 벤치마크 문서
+- `scripts/run_benchmark.py`: 원격 embedder(nvidia/hf_inference) 벤치마크 예시 + `list_supported()`
+  확인법 docstring 추가 (부족 C — 무 키 환경 제약 문서화).
 
 ---
 
@@ -1466,7 +1499,7 @@ Phase 0 (정리, 1일) → Phase 1 (ORM, 1일) → Phase 2 (감지, 2일) → Ph
 ### 🔧 완료
 - **Phase 1 (정리)**: `pdf_vision`, `mentoring`, `dashboard` 레거시 폴더 아카이브화 (`_legacy*/`) 및 `.gitignore` 추가. 불필요한 라우터, 환경변수 제거.
 - **Phase 2 (데이터 모델)**: `Subscriber` ORM 확장 (`is_darakbang_member`, `is_believer`, `emotional_state`, `faith_stage` 등 추가) 및 `DocumentVersion` 메타데이터 필드 추가.
-- **Phase 3 (서비스/API)**: 
+- **Phase 3 (서비스/API)**:
   - `subscriber_service.py`, `api/subscriber.py` 신설 (CRUD 구현).
   - `services/llm/router.py` 추가 (DeepSeek 멀티 LLM 라우터를 통해 사용자 질문에서 신호/상태 자동 추출).
   - `services/retriever.py` 내 사용자 프로필 기반 검색 랭킹 조정 로직 (C6) 적용.
