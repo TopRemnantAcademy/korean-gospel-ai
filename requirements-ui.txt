@@ -1,0 +1,10 @@
+# ─── UI(Streamlit) 컨테이너 전용 의존성 ─────────────────────────────────────
+# 백엔드 임베딩/LLM 드라이버는 제외. UI 는 백엔드 API 만 호출.
+streamlit==1.41.1
+pandas==2.2.3
+plotly==5.24.1
+python-dotenv==1.0.1
+httpx==0.28.1
+Pillow==10.4.0
+langfuse==2.57.0
+streamlit-pdf-viewer==0.0.21

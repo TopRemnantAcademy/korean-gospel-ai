@@ -1,14 +1,19 @@
 # 환경변수
 .env
+.env.production
+.env.local
+.auth_secret
 gospel.env
 .streamlit/secrets.toml
 
 # Python
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 venv/
 .venv/
+.venv312/
 *.egg-info/
 
 # Vector DB / 캐시
@@ -33,6 +38,27 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 
+# 빌드 산출물 (build-config.js 가 mobile/dist/<target>/ 로 출력 — 소스 아님)
+mobile/dist/
+
+# 디버그 진단 스크립트/이미지 (scripts/debug/ 에 보관, 추적용)
+scripts/debug/
+
+# 루트 디버그 로그/스크린샷 잔여(재생성 시 오염 방지)
+logs/*.log
+logs/*.err
+logs/*.out
+_diag*.png
+_page_screenshot.png
+page_debug.html
+
+# 레거시 웹 UI (아카이브, 빌드 대상 아님)
+_archive/legacy-web/
+
+# APK 배포 산출물 (릴리스 바이너리는 git 에 커밋하지 않음)
+releases/*.apk
+releases/*.aab
+
 # Qdrant 로컬 데이터
 .qdrant_local/
 
@@ -44,8 +70,39 @@ Thumbs.db
 data/uploads/
 data/raw/
 
+# 음원 파일 (저작권 — git에 커밋 금지)
+data/music/*
+!data/music/README.md
+
+# 업로드된 미디어 (찬양/설교 오디오)
+data/media/
+
+# 푸시 VAPID 키 (시크릿)
+.vapid_keys
+
+# Node.js / Capacitor
+node_modules/
+android/
+ios/
+*.keystore
+google-services.json
+.env.mobile
+env.mobile
+GoogleService-Info.plist
+
 # 백업 스크립트 생성 로그
 *.log
 
 # 레거시 (아카이브)
 _legacy*/
+
+# ===== 임시/진단 스크래치 (커밋 금지) =====
+# 루트 임시 검증/진단 스크립트 (임시 스크립트, 테스트 후 삭제 목적)
+tmp_*.py
+probe_*.py
+scripts_test_*_e2e.py
+scripts_bugtest_e2e.py
+# 루트 디버그 로그 디렉터리 (재생성 산출물)
+run_logs
+# CodeBuddy/WorkBuddy 툴링 락 파일 (프로젝트 소스 아님)
+skills-lock.json

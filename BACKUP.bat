@@ -1,7 +1,7 @@
 @echo off
 REM ===================================================================
-REM  Korean Gospel RAG - BACKUP
-REM  Creates a single zip of: SQLite DB + Qdrant + uploads + policy
+REM RAG - BACKUP
+REM Creates a single zip of: SQLite DB + Qdrant + uploads + policy
 REM ===================================================================
 setlocal
 cd /d "%~dp0"

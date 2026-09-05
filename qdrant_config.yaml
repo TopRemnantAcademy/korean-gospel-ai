@@ -1,11 +1,11 @@
 # =========================================================
-# Korean Gospel AI - Production Qdrant Configuration
+# - Production Qdrant Configuration
 # =========================================================
 
 service:
   api_key:
     - ${QDRANT_API_KEY}
-  
+
   # Enable telemetry (optional)
   telemetry:
     enabled: false

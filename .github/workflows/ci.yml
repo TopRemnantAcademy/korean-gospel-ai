@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# ─────────────────────────────────────────────────────────────
+# 质量门禁渐进式上线策略（资深开发把控）:
+#   - quality-gate 当前为 report-only（continue-on-error），避免第一天卡红导致团队绕行
+#   - 存量基线清理命令: 本地跑 `ruff check --fix . && ruff format .`
+#   - 基线干净后，删除对应 job 的 `continue-on-error: true` 即翻成"阻断"
+#   - Python 版本统一为 3.12，与本地 venv 对齐（原 CI 用 3.11，存在漂移）
+# ─────────────────────────────────────────────────────────────
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # ← 基线清理后删除此行
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install quality tools
+        run: pip install "ruff==0.6.9"
+      - name: Ruff lint
+        run: ruff check backend/app admin/lib tests
+      - name: Ruff format check
+        run: ruff format --check backend/app admin/lib tests
+      - name: Security scan (ruff S rules — PIPL / SSRF / injection)
+        run: ruff check --select S backend/app --output-format=concise
+
+  type-health:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # 类型健康度报告，ratchet 提升，当前不阻断
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install mypy
+        run: pip install "mypy==1.11.2"
+      - name: Mypy report (scoped to critical paths)
+        run: mypy backend/app/api backend/app/services --ignore-missing-imports
+
+  tests:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # 覆盖率先报告，设阈值门禁为后续动作
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -r requirements-deploy.txt pytest==8.3.4 pytest-cov
+      - name: Tests + coverage report
+        run: pytest --cov=backend/app --cov-report=term-missing -q

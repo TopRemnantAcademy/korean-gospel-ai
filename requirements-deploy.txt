@@ -1,4 +1,4 @@
-# ─── Korean Gospel RAG — 클라우드 배포 전용 requirements ─────────────────────
+# ───  RAG — 클라우드 배포 전용 requirements ─────────────────────
 # 로컬 ML 모델(sentence-transformers, fastembed 등) 제거 → 메모리 ~200MB
 # 임베딩: HF Inference API (HF_TOKEN 필요)
 # Reranker: none 또는 Cohere API (COHERE_API_KEY 선택)

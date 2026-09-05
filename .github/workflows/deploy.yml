@@ -26,7 +26,7 @@ jobs:
           pip install pytest # pytest가 requirements.txt에 없으므로 수동 설치
 
       - name: Run Pytest
-        run: pytest backend/tests/ -v
+        run: pytest backend/tests tests -v
         env:
           EMBEDDER: hf_inference # 로컬에 1.3GB KURE 모델을 로딩해 뻗는 것을 방지
           HF_TOKEN: "dummy_token"

@@ -1,0 +1,25 @@
+# ───  RAG — Admin/User UI (Streamlit) 전용 이미지 ──────────────
+# 백엔드 소스/시크릿/DB 를 포함하지 않는 최소 이미지.
+# 필요 파일: app.py + admin/ + user/ (Streamlit 이 st.Page() 로 로드)
+# 모든 데이터 조작은 백엔드 API(API_BASE) 경유 → 로컬 데이터/시크릿 불필요.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 의존성 레이어 ( requirements-ui.txt 가 변경될 때만 재설치 )
+COPY requirements-ui.txt ./requirements-ui.txt
+RUN pip install --no-cache-dir -r requirements-ui.txt
+
+# 앱 소스만 복사 (repo 전체 마운트 금지)
+# ⚠️ 통합 진입점은 admin/app.py (루트 app.py 는 제거됨)
+COPY admin ./admin
+COPY user ./user
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    STREAMLIT_SERVER_HEADLESS=true
+
+EXPOSE 8501
+
+CMD ["streamlit", "run", "admin/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]

@@ -1,0 +1,47 @@
+# Ruff — 统一 Python linter + formatter（替代原先仅 pyflakes 的弱检查）
+# 本地运行: ruff check .   /   ruff format .
+# pre-commit 会在每次 commit 自动跑（见 .pre-commit-config.yaml）
+#
+# 渐进式上线说明:
+#   1) 先用本配置跑一次 `ruff check --fix .` + `ruff format .` 清掉存量基线
+#   2) CI 当前为 report-only（不阻断），基线干净后把 ci.yml 的 continue-on-error 去掉即为阻断
+
+line-length = 100
+target-version = "py312"
+
+[lint]
+# 选中规则集（比 pyflakes 强得多，但仍是"低风险高收益"组合）
+select = [
+  "F",    # pyflakes — 未定义/未使用（原 CI 已覆盖）
+  "E",    # pycodestyle 错误（缩进/语法类）
+  "W",    # pycodestyle 警告
+  "I",    # isort — import 排序（统一风格，减少无意义 diff）
+  "B",    # flake8-bugbear — 易错写法（如可变默认参数）
+  "C4",   # flake8-comprehensions — 列表推导优化
+  "UP",   # pyupgrade — 现代化语法
+  "SIM",  # flake8-simplify — 简化冗余代码
+  "ASYNC",# flake8-async — 异步反模式（FastAPI 并发 bug 的克星）
+  "S",    # flake8-bandit — 安全（PIPL/SSRF/密钥/反序列化）
+  "RUF",  # ruff 自有规则
+]
+ignore = [
+  "E501",   # 行长由 formatter 统一处理
+  "S101",   # assert 在测试里可用
+  "S105",   # 测试 fixture 里的硬编码字符串（非密钥）
+  "S106",   # 测试 fixture 里的硬编码密码（非生产）
+  "B008",   # FastAPI 依赖里用 functools.partial 属正常写法
+  "ASYNC109", # 简单 async 函数体允许
+]
+
+# 路径级豁免
+[lint.per-file-ignores]
+"tests/**" = ["S", "B", "E402"]
+"scripts/**" = ["S", "E402"]
+"**/__init__.py" = ["F401"]
+# Alembic 自动生成迁移沿用官方模板风格（Union/Optional、raise-without-from 等），
+# 这些不是团队应改动的代码，豁免生成器风格规则避免 CI 误报。
+"backend/migrations/**" = ["UP", "B904", "I001", "E402"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

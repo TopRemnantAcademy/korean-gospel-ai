@@ -1,7 +1,7 @@
 @echo off
 REM ===================================================================
-REM  Korean Gospel RAG - RESTORE
-REM  Restores the most recent backup zip.
+REM RAG - RESTORE
+REM Restores the most recent backup zip.
 REM ===================================================================
 setlocal
 cd /d "%~dp0"

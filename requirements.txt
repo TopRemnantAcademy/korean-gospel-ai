@@ -1,4 +1,4 @@
-# Korean Gospel RAG v3 - Production-ready ingestion + lifecycle
+#  RAG v3 - Production-ready ingestion + lifecycle
 # Python 3.10 / 3.11 / 3.12
 
 # ----- Web -----
@@ -12,8 +12,8 @@ httpx==0.28.1
 # ----- LLM -----
 google-genai==0.3.0
 openai==1.59.6
-langgraph==0.2.60
-langchain-core==0.3.29
+anthropic>=0.40.0
+cohere>=5.0.0
 
 # ----- Embeddings / Models -----
 sentence-transformers==3.3.1
@@ -49,3 +49,8 @@ streamlit-pdf-viewer==0.0.21
 python-dotenv==1.0.1
 PyYAML==6.0.2
 numpy==2.0.2
+
+# ----- Push notifications (선택 — APK 푸시 알림 활성화 시 설치) -----
+# pywebpush==2.0.3   # Web Push (VAPID) — PWA Service Worker 푸시
+# apscheduler==3.10.4  # 매일 말씀 발송 스케줄러
+# firebase-admin==6.6.0  # FCM 토큰 발송 (Android/iOS 네이티브)
