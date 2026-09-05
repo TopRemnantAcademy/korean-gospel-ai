@@ -1,0 +1,90 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════════════════════════════
+# ai-music-platform — co-location 배포 compose (FLOW 와 동일 홍콩 대용량 1대)
+# 보안 게이트(T6.1/T6.10/T6.11/T6.6) 적용:
+#   T6.1  — DB/Redis 포트는 127.0.0.1 에만 바인딩(호스트 전면 노출 금지)
+#   T6.10 — Redis 무인증 금지(requirepass 필수)
+#   T6.11 — 앱 컨테이너 정의 + healthcheck 필수
+#   T6.6  — 앱 컨테이너 리소스 상한(mem_limit/cpus) 정의
+# ══════════════════════════════════════════════════════════════════════
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: music
+      # [D37-파생] 하드코딩된 기본 비밀번호(music123) 제거 — 미설정 시 **배포가 실패** 하도록.
+      # 127.0.0.1 바인딩(T6.1) 으로 외부 노출은 없지만, 기본 자격증명이 파일에 남는 것 자체가 위험.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 필수 — 기본 비밀번호는 금지}
+      POSTGRES_DB: music
+    # T6.1: 호스트 전면 노출 금지 — 127.0.0.1 로만 바인딩
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # T6.10: 무인증 노출 금지 — requirepass 필수.
+    # [D37-파생] 기본 비밀번호(music_redis_pw) 제거 — 미설정 시 **배포가 실패** 하도록.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD 필수 — 기본 비밀번호는 금지}"]
+    # T6.1: 호스트 전면 노출 금지
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  # T6.11 + T6.6: 앱 컨테이너 정의 + healthcheck + 리소스 상한
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # SQLite 기본(requirements 에 psycopg2 미포함 → Postgres 전환 시 드라이버 추가 필요)
+      DATABASE_URL: sqlite:////app/data/app.db
+      # T6.10 와 일치: requirepass 가 있는 Redis 에 인증
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD 필수}@redis:6379/0
+      # 🔴 [D37] **필수**. 종전에는 `${JWT_SECRET:-change-me-please}` 로 공개 기본값을
+      #    능동 주입 했다 → 미설정 시 누구나 위조 JWT 를 만들 수 있는 완전 인증 우회.
+      #    `:?` 로 바꿔 미설정 시 **배포 자체가 실패** 하게 한다(런타임 503 가드와 2중 방어).
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 필수 — 공개 기본값(change-me-please) 으로는 인증이 완전히 우회됩니다}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      MUSIC_PROVIDER: suno
+      # 🔴 [D48] Suno（open.suno.cn 网关）凭证注入。此前缺失 → 401 → 全部曲目在
+      #    routers/songs.py 的 except 中被吞掉、静默 failed（无任何报错可见）。
+      #    变量名对应 app/config.py:32-35（SUNO_API_BASE / SUNO_API_KEY / SUNO_EMAIL / SUNO_PASSWORD）。
+      SUNO_API_BASE: ${SUNO_API_BASE:-https://open.suno.cn/api/v1}
+      SUNO_API_KEY: ${SUNO_API_KEY:-}
+      SUNO_EMAIL: ${SUNO_EMAIL:-}
+      SUNO_PASSWORD: ${SUNO_PASSWORD:-}
+      # Mureka（昆仑万维）商业 API：默认关闭，后台开启 christian_worship 路由后生效
+      MUREKA_API_KEY: ${MUREKA_API_KEY:-}
+      MUREKA_MODEL: ${MUREKA_MODEL:-mureka-9}
+      MUREKA_N: ${MUREKA_N:-1}
+      MUREKA_MAX_CONCURRENT: ${MUREKA_MAX_CONCURRENT:-1}
+      # [D33] 코드 기본값은 False(config.py:48) 이므로 **여기서 명시적으로 켠다**.
+      # ⚠ 켜기만 하면 끝이 아니다 — blocklist.txt 가 CWD 에서 로드되지 않으면
+      #    자리표시자 2단어로 조용히 대체된다(moderation.py:22-35). Dockerfile WORKDIR=/app 확인.
+      ENABLE_MODERATION: "true"
+    # T6.1: API 도 127.0.0.1 로만 바인딩(역방향 프록시/caddy 경유 권장)
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      - redis
+    healthcheck:
+      # python:3.11-slim 내장 python 으로 /health 폴링(curl 미의존)
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # T6.6: 리소스 상한(단일 공존 호스트 보호)
+    mem_limit: 1g
+    cpus: "1.0"
+    volumes:
+      - appdata:/app/data
+
+volumes:
+  pgdata:
+  appdata:

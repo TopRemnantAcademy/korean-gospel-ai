@@ -1,0 +1,27 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+pydantic[email]==2.9.0
+pydantic-settings==2.5.2
+python-jose[cryptography]==3.3.0
+cryptography>=42.0.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.12
+httpx==0.27.2
+boto3==1.35.0
+pytest==8.3.2
+alembic==1.19.1
+
+# —— 真实支付供应商 (GAP-004 step-2 provider 子轨; 启用 stripe provider 时需安装) ——
+# lazy import: 未装也不影响 manual/离线流程与单测(单测以 sys.modules 注入假模块).
+stripe>=10.0.0
+
+# —— 音频后处理（可选，按需启用 enable_audio_postprocess）——
+pedalboard>=0.9.0
+noisereduce
+ffmpeg-normalize
+# 以下重型依赖需 GPU，默认不启用（F4 分离 / F5 开源生成）：
+# demucs
+# torch
+# audiocraft

@@ -1,0 +1,47 @@
+# ===== 环境变量 / 密钥（切勿提交真实值） =====
+.env
+.env.*
+.env.local
+backend/.env
+backend/.env.local
+# 但保留示例文件（供他人复制填写）
+!.env.example
+!backend/.env.example
+
+# ===== 数据库（运行时 + 测试 + 备份，均不入库） =====
+*.db
+*.db.bak
+*.sqlite
+*.sqlite3
+app.db
+app.db.bak
+app.db.bak*
+backend/app.db
+backend/app.db.bak*
+.test_app.db
+backend/.test_app.db
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv*/
+venv/
+env/
+
+# ===== Node / 前端（frontend） =====
+node_modules/
+.next/
+out/
+.turbo/
+
+# ===== 试听片段本地缓存（未配置对象存储时的回退产物，可随时重算） =====
+.cache/
+backend/.cache/
+
+# ===== 日志 / 临时 / 系统文件 =====
+*.log
+.DS_Store
+Thumbs.db
+.pytest_tmp/
