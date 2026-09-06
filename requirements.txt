@@ -16,8 +16,8 @@ anthropic>=0.40.0
 cohere>=5.0.0
 
 # ----- Embeddings / Models -----
-sentence-transformers==3.3.1
-transformers==4.47.1
+sentence-transformers==6.0.1  # CVE-2026-68770 (trust_remote_code=False 우회 RCE, 영향 ≤5.5.1 → 6.0.1 고정)
+transformers>=5.0.0,<6.0.0  # st 6.0.1 요구 transformers>=5.0.0 (<6.0.0) — 4.47.1 은 CVE 패치와 비호환
 
 # ----- Vector DB -----
 qdrant-client==1.12.2
