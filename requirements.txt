@@ -4,7 +4,7 @@
 # ----- Web -----
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
-python-multipart==0.0.20
+python-multipart==0.0.31  # SECURITY: 14 OSV advisories @0.0.20 (ReDoS/DoS), fixed 0.0.31
 pydantic==2.10.4
 pydantic-settings==2.7.0
 httpx==0.28.1
@@ -21,7 +21,7 @@ transformers>=5.0.0,<6.0.0  # st 6.0.1 요구 transformers>=5.0.0 (<6.0.0) — 4
 
 # ----- Vector DB -----
 qdrant-client==1.12.2
-fastembed==0.5.0
+fastembed==0.8.0  # SECURITY: bump so Pillow 12.3.0 (CVE fixes) is allowed; 0.5/0.6/0.7 cap pillow<12
 
 # ----- Database (SQLite -> Postgres later) -----
 sqlalchemy==2.0.36
@@ -34,19 +34,19 @@ kss==6.0.5
 langfuse==2.57.0
 
 # ----- Document loaders -----
-pypdf==5.1.0
+pypdf==6.16.1  # SECURITY: 77 OSV advisories @5.1.0, fixed 6.16.1 (API: PdfReader(BytesIO) unchanged)
 python-docx==1.1.2
 pymupdf==1.25.1
-Pillow==10.4.0
+Pillow==12.3.0  # SECURITY: 34 OSV advisories @10.4.0, fixed 12.3.0 (transitive only in this repo)
 
 # ----- Admin UI -----
-streamlit==1.41.1
+streamlit==1.54.0  # SECURITY: 4 advisories @1.41.1 (PYSEC-2026-212/2285), fixed 1.54.0
 pandas==2.2.3
 plotly==5.24.1
 streamlit-pdf-viewer==0.0.21
 
 # ----- Utils -----
-python-dotenv==1.0.1
+python-dotenv==1.2.2  # SECURITY: 2 advisories @1.0.1 (PYSEC-2026-2270), fixed 1.2.2
 PyYAML==6.0.2
 numpy==2.0.2
 
